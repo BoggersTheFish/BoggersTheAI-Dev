@@ -236,7 +236,8 @@ export const WAVE_LOG = [
   { wave: 12, name: "Pages Island LIVE", date: "2026-03", status: "complete", description: "BoggersTheAI v0.5: 200+ tests, QLoRA, multimodal. THIS SITE." },
   { wave: 13, name: "Distributed Graph", date: "2026-Q2", status: "complete", description: "Sharding + multi-agent APIs in BoggersTheAI-Dev (coordinator, Redis optional)." },
   { wave: 14, name: "Docker One-Click", date: "2026-Q3", status: "complete", description: "docker compose up — full stack in BoggersTheAI-Dev." },
-  { wave: 15, name: "WASM Port", date: "2026-Q4", status: "current", description: "Browser TS-OS Mini + Rust wasm/ts-os-mini (wasm-pack). /wasm" },
+  { wave: 15, name: "WASM Port", date: "2026-Q4", status: "complete", description: "Full WaveGraph Rust crate + TypeScript mirror. Browser wave cycle with WASM fallback for Lab. /wasm" },
+  { wave: 16, name: "Multi-Agent Coordination", date: "2026-Q4", status: "current", description: "AgentRegistry + AgentNegotiator: tension-based bid protocol, competitive edge weighting, live dashboard. /waves" },
 ] as const;
 
 export const SITE_META = {
@@ -247,7 +248,7 @@ export const SITE_META = {
   author: "BoggersTheFish",
   twitter: "@BoggersTheFish",
   lastWave: "March 21, 2026",
-  currentWave: 12,
-  waveName: "Pages Island LIVE",
+  currentWave: 16,
+  waveName: "Multi-Agent Coordination",
   ogImage: "https://boggersthefish.com/og.png",
 } as const;

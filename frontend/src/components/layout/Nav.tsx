@@ -46,11 +46,15 @@ export function Nav() {
             ? "bg-black/95 backdrop-blur-md border-b border-ts-purple/20 shadow-ts-card"
             : "bg-transparent"
         )}
+        role="banner"
       >
-        <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <nav
+          className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
+          aria-label="Main navigation"
+        >
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
-            <Link href="/" className="group flex items-center gap-3">
+            <Link href="/" className="group flex items-center gap-3" aria-label="BoggersTheFish — Home">
               <div
                 className={cn(
                   "relative w-9 h-9 rounded-full border-2 border-ts-purple",
@@ -86,6 +90,7 @@ export function Nav() {
                   <Link
                     key={link.href}
                     href={link.href}
+                    aria-current={active ? "page" : undefined}
                     className={cn(
                       "relative px-3 py-2 text-sm font-medium rounded-md transition-all duration-200",
                       "hover:text-ts-purple-light hover:bg-ts-purple/10",
@@ -145,7 +150,9 @@ export function Nav() {
             <button
               className="lg:hidden text-muted-foreground hover:text-ts-purple-light p-2 rounded-md transition-colors"
               onClick={() => setMobileOpen((v) => !v)}
-              aria-label="Toggle menu"
+              aria-label={mobileOpen ? "Close menu" : "Open menu"}
+              aria-expanded={mobileOpen}
+              aria-controls="mobile-nav-menu"
             >
               {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
@@ -157,13 +164,17 @@ export function Nav() {
       <AnimatePresence>
         {mobileOpen && (
           <motion.div
+            id="mobile-nav-menu"
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2 }}
             className="fixed top-16 left-0 right-0 z-40 bg-black/97 backdrop-blur-lg border-b border-ts-purple/20 shadow-ts-card"
           >
-            <nav className="max-w-7xl mx-auto px-4 py-4 flex flex-col gap-1">
+            <nav
+              className="max-w-7xl mx-auto px-4 py-4 flex flex-col gap-1"
+              aria-label="Mobile navigation"
+            >
               {NAV_LINKS.map((link) => {
                 const active =
                   link.href === "/"
@@ -173,6 +184,7 @@ export function Nav() {
                   <Link
                     key={link.href}
                     href={link.href}
+                    aria-current={active ? "page" : undefined}
                     className={cn(
                       "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200",
                       active
@@ -185,29 +197,43 @@ export function Nav() {
                         "w-1.5 h-1.5 rounded-full",
                         active ? "bg-ts-purple shadow-ts" : "bg-muted-foreground/40"
                       )}
+                      aria-hidden="true"
                     />
                     {link.label}
                   </Link>
                 );
               })}
               <div className="ts-divider my-2" />
-              <div className="flex items-center gap-3 px-4 py-2">
-                <Link
-                  href="https://github.com/BoggersTheFish"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-sm text-muted-foreground hover:text-ts-purple-light transition-colors"
+              {/* Actions row — includes theme toggle + GitHub so they're accessible on mobile */}
+              <div className="flex items-center justify-between px-4 py-2">
+                <div className="flex items-center gap-3">
+                  <Link
+                    href="https://github.com/BoggersTheFish"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="GitHub — BoggersTheFish"
+                    className="flex items-center gap-2 text-sm text-muted-foreground hover:text-ts-purple-light transition-colors"
+                  >
+                    <Github className="w-4 h-4" />
+                    GitHub
+                  </Link>
+                  <Link
+                    href="mailto:boggersthefish@boggersthefish.com"
+                    className="flex items-center gap-2 text-sm text-ts-purple hover:text-ts-purple-light transition-colors"
+                  >
+                    <Zap className="w-4 h-4" />
+                    Vibe-Code Me
+                  </Link>
+                </div>
+                {/* Theme toggle in mobile menu */}
+                <button
+                  onClick={toggleTheme}
+                  className="flex items-center gap-2 text-sm text-muted-foreground hover:text-ts-purple-light transition-colors p-2 rounded-md hover:bg-ts-purple/10"
+                  aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
                 >
-                  <Github className="w-4 h-4" />
-                  GitHub
-                </Link>
-                <Link
-                  href="mailto:boggersthefish@boggersthefish.com"
-                  className="flex items-center gap-2 text-sm text-ts-purple hover:text-ts-purple-light transition-colors"
-                >
-                  <Zap className="w-4 h-4" />
-                  Vibe-Code Me
-                </Link>
+                  {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                  <span className="text-xs">{theme === "dark" ? "Light" : "Dark"}</span>
+                </button>
               </div>
             </nav>
           </motion.div>

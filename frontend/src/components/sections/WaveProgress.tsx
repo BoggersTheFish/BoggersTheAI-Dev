@@ -7,6 +7,10 @@ import { WAVE_LOG } from "@/lib/tsData";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
+// Derived from WAVE_LOG so stats update automatically with each new wave
+const completedWaves = WAVE_LOG.filter((w) => w.status === "complete").length;
+const currentWaveEntry = WAVE_LOG.find((w) => w.status === "current");
+
 const STATUS_CONFIG = {
   complete: {
     icon: CheckCircle,
@@ -59,7 +63,9 @@ export function WaveProgress() {
           </h2>
           <p className="text-muted-foreground max-w-xl">
             Every wave is a completed node. The graph grows with each cycle.
-            Currently on Wave 12 — fully live.
+            {currentWaveEntry && (
+              <> Currently on Wave {currentWaveEntry.wave} — {currentWaveEntry.name}.</>
+            )}
           </p>
         </motion.div>
 
@@ -71,10 +77,10 @@ export function WaveProgress() {
           className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-10"
         >
           {[
-            { label: "Waves Complete", value: "12" },
+            { label: "Waves Complete", value: String(completedWaves) },
             { label: "Tests Passing", value: "200+" },
             { label: "Repos Live", value: "8" },
-            { label: "Current Wave", value: "#12 LIVE" },
+            { label: "Current Wave", value: currentWaveEntry ? `#${currentWaveEntry.wave} LIVE` : "—" },
           ].map((stat) => (
             <div
               key={stat.label}

@@ -22,36 +22,40 @@ const STATUS_CONFIG = {
 
 const ROADMAP_NODES = [
   {
+    id: "sharding",
+    title: "Distributed Sharding",
+    wave: 13,
+    stability: 0.95,
+    description: "ShardedGraphLayer routes nodes across N SQLite shard files via adler32 consistent hashing. Redis pub/sub syncs cross-shard tension. Activate: BOGGERS_DISTRIBUTED_ENABLED=1.",
+    status: "complete" as const,
+    link: "/lab",
+  },
+  {
     id: "docker",
     title: "Docker One-Click",
     wave: 14,
-    stability: 0.3,
-    description: "Single `docker-compose up` to spin up the full TS-OS stack — graph engine, LLM, dashboard, TUI. Zero local Python setup.",
-    status: "roadmap" as const,
-  },
-  {
-    id: "sharding",
-    title: "Distributed Sharding (>10k nodes)",
-    wave: 13,
-    stability: 0.35,
-    description: "Horizontal graph sharding for graphs exceeding 10k nodes. Consistent hashing + cross-shard activation propagation.",
-    status: "next" as const,
+    stability: 0.97,
+    description: "Full stack in one command: docker compose up -d --build. Ollama + Redis + FastAPI + Next.js with healthchecks, volumes, and optional Caddy TLS.",
+    status: "complete" as const,
+    link: "/lab",
   },
   {
     id: "wasm",
     title: "WebAssembly Port",
     wave: 15,
-    stability: 0.2,
-    description: "TS-OS core compiled to WASM. Run the wave cycle in the browser, no install required. This site becomes the runtime.",
-    status: "roadmap" as const,
+    stability: 0.92,
+    description: "WaveGraph Rust crate compiles to WASM via wasm-pack. TypeScript mirror runs immediately without a build. Lab auto-falls back to WASM when backend is offline.",
+    status: "complete" as const,
+    link: "/wasm",
   },
   {
     id: "multi-agent",
     title: "Multi-Agent Coordination",
     wave: 16,
-    stability: 0.15,
-    description: "Multiple TS instances share a global graph layer. Agents negotiate activation via competitive edge weighting.",
-    status: "roadmap" as const,
+    stability: 0.88,
+    description: "AgentRegistry + AgentNegotiator: agents bid on tense graph nodes, winner pushes activation, edge weights shift competitively. Three built-in perspectives: explorer, consolidator, synthesizer.",
+    status: "complete" as const,
+    link: "/waves",
   },
 ];
 
@@ -242,58 +246,52 @@ export default function WavesPage() {
 
       <div className="ts-divider mx-auto max-w-4xl" />
 
-      {/* Lowest-stability nodes (roadmap) */}
+      {/* Shipped roadmap nodes — system has converged */}
       <section className="py-16 px-4 sm:px-6 lg:px-8">
         <div className="max-w-4xl mx-auto">
           <div className="mb-8">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-yellow-500/30 bg-yellow-500/5 text-xs font-mono text-yellow-400 mb-4">
-              <Circle className="w-3 h-3 animate-pulse" />
-              Lowest-Stability Nodes
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-green-500/30 bg-green-500/5 text-xs font-mono text-green-400 mb-4">
+              <CheckCircle className="w-3 h-3" />
+              All Roadmap Nodes Activated
             </div>
-            <h2 className="text-2xl font-bold text-white mb-2">Roadmap — Vibe-Code These</h2>
+            <h2 className="text-2xl font-bold text-white mb-2">Roadmap — Fully Shipped</h2>
             <p className="text-muted-foreground text-sm">
-              These are the nodes with the lowest stability — the next targets for activation. 
-              The OS tells you what to build next.
+              All four roadmap waves have been activated and converged to high stability.
+              The system tells you what to build next — these nodes are now <span className="text-green-400">stable</span>.
             </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {ROADMAP_NODES.map((node) => (
-              <div
+              <Link
                 key={node.id}
+                href={node.link}
                 className={cn(
-                  "ts-card p-5",
-                  node.status === "next"
-                    ? "border-yellow-500/30"
-                    : "border-white/10"
+                  "ts-card p-5 block transition-all duration-200",
+                  "border-green-500/25 hover:border-green-500/50 hover:bg-green-500/5"
                 )}
               >
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    <Badge
-                      variant={node.status === "next" ? "low-stability" : "roadmap"}
-                      className="text-[10px]"
-                    >
+                    <Badge variant="complete" className="text-[10px]">
                       Wave {node.wave}
                     </Badge>
-                    {node.status === "next" && (
-                      <Badge variant="low-stability" className="text-[10px]">Next Up</Badge>
-                    )}
+                    <Badge variant="complete" className="text-[10px]">Shipped</Badge>
                   </div>
-                  <span className="text-[10px] font-mono text-muted-foreground">
+                  <span className="text-[10px] font-mono text-green-400/70">
                     stability {(node.stability * 100).toFixed(0)}%
                   </span>
                 </div>
                 <h3 className="font-mono font-bold text-sm text-white mb-2">{node.title}</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed mb-3">{node.description}</p>
-                {/* Low stability bar */}
-                <div className="h-1 rounded-full bg-yellow-500/10 overflow-hidden">
+                {/* High-stability bar */}
+                <div className="h-1 rounded-full bg-green-500/10 overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-yellow-500/50"
+                    className="h-full rounded-full bg-green-500/40 transition-all duration-500"
                     style={{ width: `${node.stability * 100}%` }}
                   />
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         </div>

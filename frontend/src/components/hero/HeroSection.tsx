@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { ArrowRight, Github, Zap, Play, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TSForceGraph } from "@/components/graph/TSForceGraph";
-import { TS_PHILOSOPHY } from "@/lib/tsData";
+import { TS_PHILOSOPHY, SITE_META } from "@/lib/tsData";
 import { useWaveStore } from "@/store/waveStore";
 
 const FADE_UP = {
@@ -165,7 +165,12 @@ export function HeroSection() {
           <div className="w-px h-3 bg-ts-purple/20" />
           <div className="flex items-center gap-1.5">
             <span className="text-ts-purple/50">nodes</span>
-            <span className="text-ts-purple-light">19</span>
+            <span className="text-ts-purple-light">{Object.keys(nodes).length}</span>
+          </div>
+          <div className="w-px h-3 bg-ts-purple/20" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-ts-purple/50">wave</span>
+            <span className="text-ts-purple-light">#{SITE_META.currentWave}</span>
           </div>
           <div className="w-px h-3 bg-ts-purple/20" />
           <div className="flex items-center gap-1.5">
