@@ -1,9 +1,13 @@
+# CLEAN RESPONSE LAYER — Wave 14 Production Fix
+# Returns only natural text for the Lab page while keeping full TS-OS intact
+
 from __future__ import annotations
 
 import logging
 import threading
 from typing import Any, Dict
 
+from ..entities.inference_router import clean_lab_response
 from .runtime import BoggersRuntime
 
 logger = logging.getLogger("boggers.api")
@@ -33,19 +37,26 @@ def handle_query(
         response = rt.ask(query)
     except Exception as exc:
         logger.error("Query failed: %s", exc)
-        return {"ok": False, "error": str(exc)}
-    return {
-        "ok": True,
-        "query": response.query,
-        "answer": response.answer,
-        "topics": response.topics,
-        "sufficiency_score": response.sufficiency_score,
-        "used_research": response.used_research,
-        "used_tool": response.used_tool,
-        "tool_name": response.tool_name,
-        "consolidated_merges": response.consolidated_merges,
-        "insight_path": response.insight_path,
-        "hypotheses": response.hypotheses,
-        "confidence": response.confidence,
-        "reasoning_trace": response.reasoning_trace,
-    }
+        return {
+            "ok": False,
+            "error": _friendly_http_error(str(exc)),
+        }
+    answer = clean_lab_response(response.answer)
+    return {"ok": True, "answer": answer}
+
+
+def _friendly_http_error(raw: str) -> str:
+    cleaned = clean_lab_response(raw)
+    lower = cleaned.lower()
+    if any(
+        x in lower
+        for x in (
+            "traceback",
+            "exception",
+            "keyerror",
+            "attributeerror",
+            "runtimeerror",
+        )
+    ):
+        return "Something went wrong—please try again in a moment."
+    return cleaned if cleaned else "Something went wrong—please try again in a moment."

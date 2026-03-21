@@ -1,52 +1,38 @@
 # BoggersTheAI-Dev
 
-**Integrated development and deployment stack for the Thinking System / TS-OS** — combining the official [**BoggersTheAI**](https://github.com/BoggersTheFish/BoggersTheAI) runtime (FastAPI dashboard, wave engine, SQLite graph, Ollama) with the [**boggersthefish-site**](https://github.com/BoggersTheFish/boggersthefish-site) Next.js frontend so the public site can talk to a **real** TS-OS instance, not only the client-side mini-simulator.
+**Integrated development and deployment stack for the Thinking System / TS-OS** — combining the official [**BoggersTheAI**](https://github.com/BoggersTheFish/BoggersTheAI) runtime (FastAPI, wave engine, SQLite graph, Ollama) with the [**boggersthefish-site**](https://github.com/BoggersTheFish/boggersthefish-site) Next.js frontend so the public site talks to a **real** TS-OS instance, not just the client-side mini-simulator.
 
-This repository tracks **[boggersthefish.com](https://boggersthefish.com)** roadmap: **Wave 12** (Pages Island LIVE) baseline, **Wave 14** (Docker one-click) **shipped**, **Wave 13** (Distributed Graph — sharding + multi-agent) **implemented** in code and APIs, and **Wave 15** (WASM port) via [`wasm/ts-os-mini`](wasm/ts-os-mini) + [`/wasm`](frontend/src/app/wasm/page.tsx) in the Next app.
+Tracks the [boggersthefish.com](https://boggersthefish.com) roadmap through **Wave 16** (complete).
 
 ---
 
 ## Table of contents
 
-1. [Why this repo exists](#why-this-repo-exists)
-2. [Roadmap alignment](#roadmap-alignment)
-3. [Architecture](#architecture)
-4. [How the website, Lab, and AI connect](#how-the-website-lab-and-ai-connect)
-5. [Repository layout](#repository-layout)
-6. [Prerequisites](#prerequisites)
-7. [Quick start: Docker (recommended)](#quick-start-docker-recommended)
-8. [Local development (without Docker)](#local-development-without-docker)
-9. [Configuration](#configuration)
-10. [Networking and security](#networking-and-security)
-11. [API surface](#api-surface)
-12. [Production deployment](#production-deployment)
-13. [Staying in sync with upstream](#staying-in-sync-with-upstream)
-14. [Troubleshooting](#troubleshooting)
-15. [Documentation index](#documentation-index)
-16. [License](#license)
+1. [Roadmap status](#roadmap-status)
+2. [Architecture](#architecture)
+3. [How the site, Lab, and AI connect](#how-the-site-lab-and-ai-connect)
+4. [Repository layout](#repository-layout)
+5. [Prerequisites](#prerequisites)
+6. [Quick start (Docker)](#quick-start-docker)
+7. [VPS hosting — step by step](#vps-hosting--step-by-step)
+8. [Local development (no Docker)](#local-development-no-docker)
+9. [Configuration reference](#configuration-reference)
+10. [API surface](#api-surface)
+11. [Troubleshooting](#troubleshooting)
+12. [Documentation index](#documentation-index)
+13. [License](#license)
 
 ---
 
-## Why this repo exists
+## Roadmap status
 
-The marketing site and lab pages describe a **local-first** TS-OS: a persistent graph, a background wave cycle, and a FastAPI observability layer. Upstream ships **BoggersTheAI** and **boggersthefish-site** as separate repositories. **BoggersTheAI-Dev** glues them for:
-
-- **One `docker compose up` path** to Ollama + backend + frontend (+ optional Caddy for TLS).
-- **Server-side proxying** of dashboard APIs so `BOGGERS_DASHBOARD_TOKEN` never has to ship in browser bundles as `NEXT_PUBLIC_*`.
-- **Live lab UX**: polling `/status`, posting to `/query`, and optional session headers for future multi-tenant work.
-
----
-
-## Roadmap alignment
-
-| Wave | Site label | Role in this repo |
-|------|------------|-------------------|
-| **12** | Pages Island LIVE | Baseline: real FastAPI + real Next.js when compose is up. |
-| **13** | Distributed Graph (Q2) | **Implemented:** shard router + coordinator, `/distributed/*` API, optional Redis multi-agent — see [`docs/WAVE13.md`](docs/WAVE13.md). |
-| **14** | Docker One-Click | **Shipped:** `docker compose up`, volumes, healthchecks, `redis`, optional Caddy TLS. |
-| **15** | WASM Port | **Implemented:** Rust `wasm/ts-os-mini`, `/wasm` page, `scripts/build-wasm.sh` — see [`docs/WAVE15.md`](docs/WAVE15.md). |
-
-Official philosophy and loop description: [TS-OS page](https://boggersthefish.com/ts-os), install steps: [Lab](https://boggersthefish.com/lab).
+| Wave | Label | Status | Notes |
+|------|-------|--------|-------|
+| **12** | Pages Island LIVE | ✅ Shipped | Baseline: FastAPI + Next.js compose stack |
+| **13** | Distributed Sharding | ✅ Complete | Consistent-hash sharding, Redis-backed counts, cross-shard tension pub/sub — [`docs/WAVE13.md`](docs/WAVE13.md) |
+| **14** | Docker One-Click | ✅ Shipped | `docker compose up -d --build`, healthchecks, optional Caddy TLS |
+| **15** | WebAssembly Port | ✅ Complete | Full `WaveGraph` Rust crate, TypeScript mirror, browser WASM fallback in Lab — [`docs/WAVE15.md`](docs/WAVE15.md) |
+| **16** | Multi-Agent Coordination | ✅ Complete | AgentRegistry + AgentNegotiator, tension-based bid protocol, competitive edge weighting, live dashboard — [`docs/WAVE16.md`](docs/WAVE16.md) |
 
 ---
 
@@ -55,71 +41,59 @@ Official philosophy and loop description: [TS-OS page](https://boggersthefish.co
 ```mermaid
 flowchart TB
   subgraph browser [Browser]
-    UI[Next.js UI / Lab / TS-OS pages]
+    UI[Next.js UI]
+    WASM[Wave 15 WASM engine]
   end
 
-  subgraph next [Frontend container]
+  subgraph next [Frontend container :3000]
     NR[Next.js server]
-    PH["Route handler /api/boggers/*"]
+    PH["/api/boggers/* proxy"]
   end
 
-  subgraph py [Backend container]
+  subgraph py [Backend container :8000]
     API[FastAPI dashboard]
     RT[BoggersRuntime + graph]
+    NEG[Wave 16 AgentNegotiator]
   end
 
-  subgraph llm [Ollama container]
+  subgraph llm [Ollama :11434]
     OL[ollama serve]
   end
 
-  subgraph cache [Redis]
+  subgraph data [Redis + SQLite]
     RD[redis:7]
+    DB[(graph_shard_N.db)]
   end
 
-  UI -->|HTTP same-origin| NR
+  UI -->|same-origin| NR
   NR --> PH
-  PH -->|"Bearer token server-side"| API
+  PH -->|Bearer token server-side| API
   API --> RT
-  API --> RD
+  RT --> NEG
+  RT --> RD
+  RT --> DB
   RT -->|HTTP| OL
+  WASM -.->|fallback when offline| UI
 ```
 
-- **Browser** calls only the Next origin (e.g. `http://localhost:3000`). It uses paths like `/api/boggers/status` and `/api/boggers/query`.
-- **Next.js route handler** forwards to `BOGGERS_INTERNAL_URL` (e.g. `http://backend:8000`) and attaches `BOGGERS_DASHBOARD_TOKEN` when set.
-- **Backend** reads `config.yaml` (Docker: bind-mounted [`config.docker.yaml`](config.docker.yaml)) with `inference.ollama.base_url` pointing at the **`ollama`** service.
-- **Persistent data**: named volume for `/data` (SQLite `graph.db`, vault, traces, snapshots) and volume for Ollama model cache.
+- **Browser** calls only `/api/boggers/*` (same-origin). `BOGGERS_DASHBOARD_TOKEN` is never exposed to the client.
+- **Next proxy** forwards to `BOGGERS_INTERNAL_URL` (internal Docker network).
+- **Backend** reads `config.docker.yaml` (mounted at `/app/config.yaml`) with Ollama at `http://ollama:11434`.
+- **Wave 15 WASM**: browser-local fallback when Docker is offline — same propagate/relax math as Python.
+- **Wave 16 agents**: `explorer`, `consolidator`, `synthesizer` — negotiate activation over tense graph nodes via Redis.
 
 ---
 
-## How the website, Lab, and AI connect
+## How the site, Lab, and AI connect
 
-This repo is what powers a **live** [boggersthefish.com](https://boggersthefish.com)-style deployment: the **marketing site and Lab are Next.js**; the **Thinking System runtime is BoggersTheAI** (Python) plus **Ollama** for LLM/embeddings and **Redis** for Wave 13 multi-agent. Nothing in the **browser** should call Ollama directly—the **Next.js server** is the only client that talks to FastAPI on the internal URL.
-
-### Request path (what visitors hit)
-
-| Visitor action | Browser calls | Next.js | Backend | Models / data |
-|----------------|---------------|---------|---------|----------------|
-| Open any page | `GET /…` | Renders UI | — | — |
-| **Lab** — live wave stats | `GET /api/boggers/status` | [`api/boggers/[...path]`](frontend/src/app/api/boggers/%5B...path%5D/route.ts) proxies | `GET /status` | Graph + wave state |
-| **Lab** — “Push a Node” | `POST /api/boggers/query` | Same proxy + **Bearer token** | `POST /query` → `handle_query` | Graph + **Ollama** synthesis per [`config.docker.yaml`](config.docker.yaml) |
-| **Wave 15** — TS-OS Mini | `GET /wasm` (+ WASM assets) | Serves page / `public/wasm` | Optional: none for static demo | Browser WASM or prebuilt pack |
-
-The browser always uses **same-origin** URLs (`/api/boggers/...`). The **`BOGGERS_DASHBOARD_TOKEN`** is added **only on the server** when proxying; it is **not** exposed as `NEXT_PUBLIC_*`.
-
-### What “AI is working” means
-
-1. **Containers healthy** — `docker compose ps`; backend healthcheck passes.
-2. **Ollama has models** — at least the chat model and embedding model named in `config.docker.yaml` (defaults: `llama3.2`, `nomic-embed-text`). Use `docker compose exec ollama ollama list` or `scripts/deploy.sh` pulls.
-3. **Token alignment** — if `BOGGERS_DASHBOARD_TOKEN` is set in `.env`, both **`backend`** and **`frontend`** services receive it so the proxy can authenticate to FastAPI.
-4. **Inference throttle** — `inference.throttle_seconds` in config can **reuse** a previous answer when queries arrive too quickly; if answers feel “stuck,” lower that value for testing (see [Configuration](#configuration)).
-
-### Deployment shapes
-
-| Shape | When to use | Wiring |
-|-------|-------------|--------|
-| **All-in-one VPS (recommended)** | Single machine for [boggersthefish.com](https://boggersthefish.com) | Compose: `frontend` → `BOGGERS_INTERNAL_URL=http://backend:8000`. Optional **Caddy** (`--profile tls`) for HTTPS on **80/443**. Use [`scripts/vps-bootstrap.sh`](scripts/vps-bootstrap.sh) or [`docs/VPS.md`](docs/VPS.md). |
-| **Docker on laptop / CI** | Development, demos | Same compose file; UI at `http://localhost:3000`. |
-| **Split: Next hosted elsewhere** | e.g. Vercel frontend, API on a VPS | The **Next server** (Node) must reach your API: set **`BOGGERS_INTERNAL_URL`** to that API’s base URL (often `https://api.yourdomain.com`). The API must accept the Bearer token and (if browser calls FastAPI directly) **`BOGGERS_CORS_ORIGINS`** must include your site origin. |
+| Visitor action | Browser calls | Next.js | Backend | Data |
+|----------------|---------------|---------|---------|------|
+| Any page | `GET /…` | Renders UI | — | — |
+| Lab live stats | `GET /api/boggers/status` | Proxy | `GET /status` | Graph + wave |
+| **Push a Node** | `POST /api/boggers/query` | Proxy + Bearer | `POST /query → handle_query` | Graph + Ollama |
+| Push a Node (offline) | — | — | — | **Wave 15 WASM engine** answers locally |
+| `/wasm` page | `GET /wasm` | Serves page | Optional | Browser WASM or TS fallback |
+| `/waves` page | `GET /api/boggers/agents/list` | Proxy | Wave 16 agent registry | Redis / memory |
 
 ---
 
@@ -127,95 +101,314 @@ The browser always uses **same-origin** URLs (`/api/boggers/...`). The **`BOGGER
 
 | Path | Purpose |
 |------|---------|
-| [`backend/`](backend/) | **BoggersTheAI** — Python package, `dashboard/app.py`, `config.yaml`, tests. |
-| [`frontend/`](frontend/) | **boggersthefish-site** — Next.js 15 App Router, lab, proxy under `src/app/api/boggers/`. |
-| [`config.docker.yaml`](config.docker.yaml) | Compose profile: Ollama URL `http://ollama:11434`, paths under `/data`. |
-| [`docker-compose.yml`](docker-compose.yml) | Services: `ollama`, `redis`, `backend`, `frontend`; optional `caddy` (`--profile tls`). |
-| [`Caddyfile`](Caddyfile) | TLS + reverse proxy to `frontend:3000` when using the TLS profile. |
-| [`scripts/deploy.sh`](scripts/deploy.sh) | Build, up, `ollama pull`, quick health curls. |
-| [`scripts/vps-bootstrap.sh`](scripts/vps-bootstrap.sh) | **Ubuntu VPS one-shot:** Docker install, clone `/opt`, `.env` + token, compose, models, verify. |
-| [`docs/README.md`](docs/README.md) | Index of runbooks and wave docs. |
-| [`docs/VPS.md`](docs/VPS.md) | Firewall, swap, backups, systemd. |
-| [`docs/WAVE13.md`](docs/WAVE13.md) | Wave 13 — sharding + multi-agent. |
-| [`docs/WAVE15.md`](docs/WAVE15.md) | Wave 15 — WASM crate + `/wasm`. |
-| [`wasm/ts-os-mini`](wasm/ts-os-mini) | Rust → WebAssembly (wasm-pack). |
-| [`scripts/verify-stack.sh`](scripts/verify-stack.sh) | Post-deploy HTTP checks. |
-| [`scripts/backup-volumes.sh`](scripts/backup-volumes.sh) | Volume tarball backup. |
-| [`systemd/ts-os.service`](systemd/ts-os.service) | Example unit wrapping `docker compose`. |
-| [`.github/workflows/ts-os-smoke.yml`](.github/workflows/ts-os-smoke.yml) | CI: compose config, image builds, backend pytest, frontend build, wasm-pack. |
+| `backend/` | BoggersTheAI — FastAPI dashboard, wave engine, graph, all Python |
+| `frontend/` | Next.js 15 App Router — lab, wasm, waves, proxy |
+| `wasm/ts-os-mini/` | Rust → WASM (wasm-pack): `WaveGraph`, propagate, relax, emergence |
+| `config.docker.yaml` | Compose config: Ollama URL, `/data` paths, wave settings |
+| `docker-compose.yml` | Services: ollama, redis, backend, frontend; optional caddy (tls profile) |
+| `Caddyfile` | TLS + reverse proxy to frontend:3000 |
+| `.env.example` | All env vars with defaults |
+| `scripts/deploy.sh` | Build + up + model pull + health check |
+| `scripts/vps-bootstrap.sh` | Ubuntu one-shot: Docker install → clone → compose → models → verify |
+| `scripts/verify-stack.sh` | HTTP health checks against the running stack |
+| `scripts/backup-volumes.sh` | Tar backup of all named volumes |
+| `scripts/build-wasm.sh` | wasm-pack build → `frontend/public/wasm/ts-os-mini/` |
+| `docs/WAVE13.md` | Wave 13: distributed sharding architecture |
+| `docs/WAVE15.md` | Wave 15: WASM port architecture |
+| `docs/WAVE16.md` | Wave 16: multi-agent coordination architecture |
+| `docs/VPS.md` | Firewall, swap, backups, systemd, secrets |
+| `systemd/ts-os.service` | systemd unit wrapping `docker compose` |
+| `.github/workflows/ts-os-smoke.yml` | CI: compose config, image builds, pytest, Next build, wasm-pack |
 
 ---
 
 ## Prerequisites
 
-- **Docker** + Docker Compose v2 (for the full stack).
-- **Optional local dev:** Python ≥ 3.10, Node.js 18+, **Ollama** installed for LLM/embeddings when not using Docker.
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| Docker Engine | 24+ | With Docker Compose v2 (`docker compose`) |
+| Docker Compose | v2.20+ | Included with Docker Desktop; `docker compose version` to check |
+| RAM | ≥ 4 GB | 8 GB+ recommended for Ollama + embeddings |
+| Disk | ≥ 20 GB free | Ollama models are large (llama3.2 ≈ 2 GB) |
+
+For local dev (no Docker): Python ≥ 3.10, Node.js 18+, Ollama installed locally.
 
 ---
 
-## Quick start (Docker) (recommended)
+## Quick start (Docker)
 
 ```bash
 git clone https://github.com/BoggersTheFish/BoggersTheAI-Dev.git
 cd BoggersTheAI-Dev
 
 cp .env.example .env
-# Set BOGGERS_DASHBOARD_TOKEN for any shared/hosted deployment
+# Optional: set BOGGERS_DASHBOARD_TOKEN=<strong-random-value>
 
 docker compose up -d --build
 ```
 
-Optional one-shot helper (Linux/macOS):
+Wait ~60–90 s for all health checks to pass, then:
 
 ```bash
-bash scripts/deploy.sh
+# Pull Ollama models (required for LLM responses):
+docker compose exec ollama ollama pull llama3.2
+docker compose exec ollama ollama pull nomic-embed-text
+
+# Verify:
+bash scripts/verify-stack.sh
 ```
 
-### Ubuntu VPS — one command (fresh server)
+**URLs:**
+- Site + Lab: http://localhost:3000
+- WASM demo: http://localhost:3000/wasm
+- Multi-agent: http://localhost:3000/waves
+- Backend API: http://localhost:8000/health/live
+- Wave 16 dashboard: http://localhost:8000/agents/dashboard
 
-Installs Docker if needed, clones to `/opt/BoggersTheAI-Dev`, creates `.env` with a random **`BOGGERS_DASHBOARD_TOKEN`**, builds and starts the stack, pulls **Ollama** models from [`config.docker.yaml`](config.docker.yaml), and runs [`scripts/verify-stack.sh`](scripts/verify-stack.sh).
+---
+
+## VPS hosting — step by step
+
+This section explains how to host the full stack on a public VPS (Ubuntu 22.04 / 24.04 recommended) so [boggersthefish.com](https://boggersthefish.com) or your own domain serves the live TS-OS.
+
+### Option A — One-command bootstrap (fastest)
+
+From your VPS (SSH in as a sudo user):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/BoggersTheFish/BoggersTheAI-Dev/main/scripts/vps-bootstrap.sh | sudo bash
 ```
 
-With your public hostname (sets CORS; optional HTTPS via Caddy):
+With a custom domain + automatic HTTPS (Caddy + Let's Encrypt):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/BoggersTheFish/BoggersTheAI-Dev/main/scripts/vps-bootstrap.sh | sudo bash -s -- --domain your.domain.com --tls
+curl -fsSL https://raw.githubusercontent.com/BoggersTheFish/BoggersTheAI-Dev/main/scripts/vps-bootstrap.sh \
+  | sudo bash -s -- --domain your.domain.com --tls
 ```
 
-After `--tls`, point DNS **A/AAAA** for `your.domain.com` to this VPS; open **80/443** in the firewall ([`docs/VPS.md`](docs/VPS.md)). The script `chown`s the repo to **`SUDO_USER`** when run via `sudo` so you can edit `.env` without root.
+The script:
+1. Installs Docker (if missing)
+2. Clones the repo to `/opt/BoggersTheAI-Dev`
+3. Creates `.env` with a random `BOGGERS_DASHBOARD_TOKEN`
+4. Sets `CADDY_DOMAIN` and `BOGGERS_CORS_ORIGINS` when `--domain` is passed
+5. Runs `docker compose up -d --build` (or `--profile tls` with `--tls`)
+6. Pulls `llama3.2` and `nomic-embed-text` into Ollama
+7. Runs `scripts/verify-stack.sh` to confirm everything is healthy
 
-**Verification** (after containers are healthy):
+DNS: point an **A record** (and AAAA if IPv6) for your domain to the VPS IP **before** running with `--tls` (Let's Encrypt needs it to resolve).
+
+---
+
+### Option B — Manual step-by-step
+
+Use this if you want full control or are on a non-Ubuntu distro.
+
+#### 1. Provision the VPS
+
+Recommended specs:
+- Ubuntu 22.04 or 24.04 LTS
+- 2 vCPU minimum, 4+ for Ollama
+- 8 GB RAM (4 GB minimum with swap)
+- 40 GB SSD
+
+#### 2. Add swap (important for Ollama on low-RAM servers)
+
+```bash
+sudo fallocate -l 8G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+#### 3. Install Docker
+
+```bash
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER
+# Log out and back in so group takes effect
+newgrp docker
+docker --version  # verify
+docker compose version  # verify v2
+```
+
+#### 4. Open firewall ports
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp    # HTTP (Caddy redirect or direct)
+sudo ufw allow 443/tcp   # HTTPS (Caddy TLS)
+sudo ufw enable
+# Do NOT expose 8000 (backend), 11434 (Ollama), or 6379 (Redis) publicly
+```
+
+#### 5. Clone the repository
+
+```bash
+sudo git clone https://github.com/BoggersTheFish/BoggersTheAI-Dev.git /opt/BoggersTheAI-Dev
+sudo chown -R $USER:$USER /opt/BoggersTheAI-Dev
+cd /opt/BoggersTheAI-Dev
+```
+
+#### 6. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your values:
+
+```env
+# Strong random value — protects /status, /graph, /query, etc.
+BOGGERS_DASHBOARD_TOKEN=<generate with: openssl rand -hex 32>
+
+# Your domain (used by Caddy for TLS and by CORS config)
+CADDY_DOMAIN=your.domain.com
+
+# Allow your domain to call the API directly (same-origin proxy is primary)
+BOGGERS_CORS_ORIGINS=https://your.domain.com
+
+# Redis (internal only, do not change unless using external Redis)
+REDIS_URL=redis://redis:6379/0
+
+# Wave 13 sharding (optional — leave as 0 unless >10k nodes)
+BOGGERS_DISTRIBUTED_ENABLED=0
+BOGGERS_SHARD_COUNT=4
+BOGGERS_GLOBAL_MAX_NODES=100000
+BOGGERS_PER_SHARD_MAX_NODES=25000
+```
+
+#### 7. Start the stack
+
+**Without TLS** (HTTP only, port 3000):
+```bash
+docker compose up -d --build
+```
+
+**With TLS** (HTTPS via Caddy, ports 80/443 — requires DNS pointed at this server):
+```bash
+docker compose --profile tls up -d --build
+```
+
+Wait for containers to become healthy (~60–90 seconds):
+```bash
+docker compose ps
+# All should show "healthy"
+```
+
+#### 8. Pull Ollama models
+
+```bash
+docker compose exec ollama ollama pull llama3.2
+docker compose exec ollama ollama pull nomic-embed-text
+```
+
+> **Note:** `llama3.2` is ~2 GB. On a slow connection this takes a few minutes. Queries work without models but return extractive (non-LLM) answers until models are pulled.
+
+#### 9. Verify the deployment
 
 ```bash
 bash scripts/verify-stack.sh
-# or: make verify
 ```
 
-- **UI:** [http://localhost:3000](http://localhost:3000) — try **Lab** for live `/status` polling and **Push a Node** → `POST /query` via the proxy.
-- **Wave 15:** [http://localhost:3000/wasm](http://localhost:3000/wasm) — browser TS-OS Mini; optional native WASM via `bash scripts/build-wasm.sh`.
-- **Backend (debug):** [http://localhost:8000/health/live](http://localhost:8000/health/live)
-- **Ollama API (host):** port `11434` mapped in compose.
+This checks:
+- `GET /health/live` → backend alive
+- `GET /health/ready` → backend ready
+- Frontend accessible on port 3000 (or 443 with TLS)
+- Wave cycle running
 
-**HTTPS / Caddy** (production-style):
+Visit your domain (or `http://<server-ip>:3000`):
+- **Home**: site loads
+- **Lab** (`/lab`): wave status shows; "Push a Node" returns an AI answer
+- **WASM** (`/wasm`): wave cycle runs in browser; shows "TypeScript" badge (upgrade to "WebAssembly" by running `bash scripts/build-wasm.sh` with Rust + wasm-pack)
+- **Waves** (`/waves`): multi-agent panel shows 3 active agents; "Negotiate" button triggers a round
+
+#### 10. Set up auto-restart with systemd
 
 ```bash
-# Set CADDY_DOMAIN in .env to your hostname, then:
-docker compose --profile tls up -d
+sudo install -m 644 systemd/ts-os.service /etc/systemd/system/ts-os.service
+
+# Edit WorkingDirectory if your clone path differs from /opt/BoggersTheAI-Dev:
+sudo sed -i 's|/opt/BoggersTheAI-Dev|'$(pwd)'|g' /etc/systemd/system/ts-os.service
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now ts-os.service
+sudo systemctl status ts-os.service
+```
+
+The stack will now restart automatically on server reboot.
+
+#### 11. Update the deployment
+
+```bash
+cd /opt/BoggersTheAI-Dev
+git pull
+docker compose up -d --build
+bash scripts/verify-stack.sh
+```
+
+Or use the helper script:
+```bash
+bash scripts/deploy.sh
+```
+
+#### 12. Back up your data
+
+Graph, traces, vault, and Ollama models live in named Docker volumes. Back them up:
+
+```bash
+bash scripts/backup-volumes.sh ./backups
+```
+
+Restoring:
+```bash
+# Example: restore boggers-data
+docker run --rm -v ts-os_boggers-data:/v -v $(pwd)/backups:/backup alpine \
+  tar xzf /backup/boggers-data.tgz -C /v
 ```
 
 ---
 
-## Local development (without Docker)
+### VPS checklist (production)
+
+| # | Task | Command / Notes |
+|---|------|-----------------|
+| 1 | DNS A record | Point `your.domain.com` → VPS IP |
+| 2 | Swap added | `swapon --show` |
+| 3 | Docker installed | `docker compose version` |
+| 4 | Firewall: 22, 80, 443 only | `sudo ufw status` |
+| 5 | `.env` with strong token | `BOGGERS_DASHBOARD_TOKEN` set |
+| 6 | Stack healthy | `docker compose ps` all green |
+| 7 | Ollama models pulled | `docker compose exec ollama ollama list` |
+| 8 | TLS working | `curl -I https://your.domain.com` → 200 |
+| 9 | systemd unit enabled | `systemctl is-enabled ts-os` |
+| 10 | Backup cron set | `crontab -e` → `0 3 * * * bash /opt/.../backup-volumes.sh ...` |
+
+---
+
+### Updating to a new wave
+
+When a new wave ships:
+
+```bash
+cd /opt/BoggersTheAI-Dev
+git pull
+docker compose up -d --build   # rebuilds only changed layers
+bash scripts/verify-stack.sh
+```
+
+No data is lost — volumes are separate from the containers.
+
+---
+
+## Local development (no Docker)
 
 ### Backend
 
 ```bash
 cd backend
 pip install -e ".[llm,adapters,agents]"
-# copy/env: ensure config.yaml exists; start Ollama locally; for Wave 13 agents, run Redis or use in-memory fallback
+# Ensure Ollama is running locally; create/edit backend/config.yaml
 dashboard-start
 # → http://localhost:8000
 ```
@@ -227,116 +420,117 @@ cd frontend
 npm install
 cp .env.example .env.local
 # BOGGERS_INTERNAL_URL=http://127.0.0.1:8000
-# BOGGERS_DASHBOARD_TOKEN=...   if your dashboard uses a token
+# BOGGERS_DASHBOARD_TOKEN=<match backend>
 npm run dev
 # → http://localhost:3000
 ```
 
-Parity note: upstream docs sometimes mention `python main.py`; this project standardizes on **`dashboard-start`** / uvicorn for the FastAPI dashboard, consistent with the BoggersTheAI README.
+### WASM (optional)
+
+```bash
+# Requires Rust + wasm-pack (https://rustwasm.github.io/wasm-pack/)
+bash scripts/build-wasm.sh
+# → frontend/public/wasm/ts-os-mini/
+# The /wasm page will show "WebAssembly" badge instead of "TypeScript"
+```
 
 ---
 
-## Configuration
+## Configuration reference
 
-| Concern | Source |
-|--------|--------|
-| Graph + wave + Ollama | `backend/config.yaml` locally; in Docker, [`config.docker.yaml`](config.docker.yaml) mounted as `/app/config.yaml`. |
-| Inference throttle | `inference.throttle_seconds` in YAML — limits how often **synthesis** runs; rapid Lab clicks may see reused output with a `[throttle]` note. |
-| Dashboard bind | `BOGGERS_DASHBOARD_HOST`, `BOGGERS_DASHBOARD_PORT` |
-| Auth | `BOGGERS_DASHBOARD_TOKEN` (must match between `backend` and `frontend` services when using the Next proxy). |
-| CORS (browser → FastAPI direct) | `BOGGERS_CORS_ORIGINS` (comma-separated). Prefer same-origin `/api/boggers` in production. |
-| Next → backend URL | `BOGGERS_INTERNAL_URL` (server-only; never `NEXT_PUBLIC_*`). |
-| Public API base path (client) | `NEXT_PUBLIC_BOGGERS_API_BASE` (default `/api/boggers`). |
-| Wave 13 Redis (multi-agent) | `REDIS_URL` (compose default `redis://redis:6379/0`). |
-| Wave 13 sharding (logical API) | `BOGGERS_DISTRIBUTED_ENABLED`, `BOGGERS_SHARD_COUNT`, `BOGGERS_GLOBAL_MAX_NODES`, `BOGGERS_PER_SHARD_MAX_NODES` |
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `BOGGERS_DASHBOARD_TOKEN` | *(empty)* | Protects all authenticated endpoints. Set a strong random value in production. |
+| `BOGGERS_DASHBOARD_HOST` | `127.0.0.1` | FastAPI bind address. Compose sets `0.0.0.0`. |
+| `BOGGERS_DASHBOARD_PORT` | `8000` | FastAPI port. |
+| `BOGGERS_CORS_ORIGINS` | `http://localhost:3000` | Browser-to-backend CORS. Set to your real domain in production. |
+| `BOGGERS_INTERNAL_URL` | `http://backend:8000` | Next.js → backend URL (server-only). |
+| `NEXT_PUBLIC_BOGGERS_API_BASE` | `/api/boggers` | Client-side API prefix. |
+| `REDIS_URL` | `redis://redis:6379/0` | Wave 13 agent queue + Wave 16 registry. Falls back to memory if unreachable. |
+| `CADDY_DOMAIN` | `localhost` | Domain for Caddy TLS profile. |
+| `BOGGERS_DISTRIBUTED_ENABLED` | `0` | Set `1` to activate Wave 13 sharding (multi-shard SQLite). |
+| `BOGGERS_SHARD_COUNT` | `4` | Number of SQLite shard files when distributed is enabled. |
+| `BOGGERS_GLOBAL_MAX_NODES` | `100000` | Global node cap across all shards. |
+| `BOGGERS_PER_SHARD_MAX_NODES` | `25000` | Per-shard node cap. |
 
-Strict config validation: `BOGGERS_CONFIG_STRICT=1` in the backend environment.
+YAML config for graph, wave, Ollama, and emergence parameters lives in `config.docker.yaml` (Docker) or `backend/config.yaml` (local). Key values:
 
----
-
-## Networking and security
-
-- **Tokens:** Treat `BOGGERS_DASHBOARD_TOKEN` as a secret; rotate by updating `.env` and recreating containers.
-- **Rate limiting:** `POST /query` is limited per **session header or IP** (slowapi `key_func`) on the FastAPI app.
-- **Session header:** Clients may send `X-Boggers-Session-ID` (used for rate-limit keying when present); not a substitute for auth.
-- **Edge:** For public internet, put HTTPS in front (Caddy profile or external CDN) and restrict exposed ports (see [`docs/VPS.md`](docs/VPS.md)).
-
----
-
-## API surface (high level)
-
-Backend routes (proxied under `/api/boggers/` by Next):
-
-| Route | Purpose |
-|-------|---------|
-| `GET /health/live` | Liveness |
-| `GET /status` | Wave + graph counts (auth if token set) |
-| `GET /graph`, `GET /graph/viz` | Graph JSON / Cytoscape UI |
-| `POST /query` | Full `handle_query` pipeline |
-| `GET /wave` | Chart.js tension page |
-| `GET /metrics/prometheus` | Prometheus text (auth if token set) |
-| `GET /distributed/status`, `POST /distributed/assign` | Wave 13 shard coordinator (`BOGGERS_DISTRIBUTED_ENABLED=1`) |
-| `GET /agents/status`, `POST /agents/tasks`, `POST /agents/tasks/wait` | Wave 13 multi-agent queue (Redis or memory) |
+```yaml
+inference.ollama.model: "llama3.2"        # chat model
+inference.ollama.base_url: "http://ollama:11434"
+embeddings.model: "nomic-embed-text"      # embedding model
+wave.interval_seconds: 30                 # wave cycle frequency
+wave.tension_threshold: 0.20              # emergence threshold
+guardrails.max_nodes: 5000               # safety cap (in-memory)
+```
 
 ---
 
-## Production deployment
+## API surface
 
-### Checklist (public site + Lab + AI)
+All routes are proxied by Next.js under `/api/boggers/*`.
 
-1. **Host** — Ubuntu VPS (or similar) with Docker; DNS **A/AAAA** pointing at the server for your domain.
-2. **Bootstrap** — [Ubuntu VPS one command](#ubuntu-vps--one-command-fresh-server) (`vps-bootstrap.sh`) or manual clone + `cp .env.example .env` + strong **`BOGGERS_DASHBOARD_TOKEN`**.
-3. **TLS** — `docker compose --profile tls up -d` with **`CADDY_DOMAIN`** (and **80/443** open); or terminate TLS at Cloudflare/nginx and forward to **3000**.
-4. **CORS** — set **`BOGGERS_CORS_ORIGINS`** to your real origins (the bootstrap script can set this when you pass **`--domain`**). Same-origin Lab traffic usually goes through **`/api/boggers`**; CORS matters for direct API access or split stacks.
-5. **Models** — ensure Ollama pulls match **`config.docker.yaml`** (`ollama pull` for `inference.ollama.model` and embedding model).
-6. **Firewall** — prefer **22, 80, 443** only; avoid exposing **8000**, **11434**, **6379** publicly (see [`docs/VPS.md`](docs/VPS.md)).
-7. **Persistence** — volumes **`boggers-data`**, **`ollama-data`**, **`redis-data`**; back up with [`scripts/backup-volumes.sh`](scripts/backup-volumes.sh).
-8. **Verify** — [`scripts/verify-stack.sh`](scripts/verify-stack.sh) from the server; hit **Lab** `/lab` and confirm **Push a Node** returns an answer, not “Offline or unreachable.”
-
-### Operations
-
-- **Script:** [`scripts/deploy.sh`](scripts/deploy.sh) — build, up, model pulls, quick curls.
-- **Runbook:** [`docs/VPS.md`](docs/VPS.md) — UFW, swap, backups, secrets, rate limits.
-- **systemd:** [`systemd/ts-os.service`](systemd/ts-os.service) — set **`WorkingDirectory`** to your clone (e.g. `/opt/BoggersTheAI-Dev`); install with `sudo install -m 644 systemd/ts-os.service /etc/systemd/system/ts-os.service` from repo root.
-
----
-
-## Staying in sync with upstream
-
-`backend/` and `frontend/` are maintained from:
-
-- https://github.com/BoggersTheFish/BoggersTheAI  
-- https://github.com/BoggersTheFish/boggersthefish-site  
-
-To refresh from upstream (when using plain copies without submodules), replace those trees with fresh clones or merge vendor updates manually, then re-apply this repo’s compose/Docker/proxy patches as needed.
-
-Optional reference repos for Wave 13 / theory: **TS-Core**, **BoggersThePulse**, **GOAT-TS** (see [boggersthefish.com/projects](https://boggersthefish.com/projects)).
+| Route | Auth | Purpose |
+|-------|------|---------|
+| `GET /health/live` | No | Liveness probe |
+| `GET /health/ready` | Token | Readiness + health checks |
+| `GET /status` | Token | Wave cycle stats + node/edge counts |
+| `GET /graph` | Token | Full graph JSON |
+| `GET /graph/viz` | Token | Cytoscape.js interactive graph |
+| `POST /query` | Token | Full query pipeline (graph → Ollama synthesis) |
+| `GET /wave` | Token | Chart.js tension dashboard |
+| `GET /metrics` | Token | Graph + wave metrics |
+| `GET /metrics/prometheus` | Token | Prometheus text format |
+| `GET /traces` | Token | Recent reasoning traces |
+| **Wave 13** | | |
+| `GET /distributed/status` | Token | Shard coordinator health |
+| `GET /distributed/shards` | Token | Per-shard SQLite node counts |
+| `GET /distributed/tension` | Token | Live tension with shard assignments |
+| `POST /distributed/assign` | Token | Dry-run shard allocation check |
+| **Wave 13 agents** | | |
+| `GET /agents/status` | Token | Queue depth + backend (Redis/memory) |
+| `POST /agents/tasks` | Token | Enqueue agent task |
+| `POST /agents/tasks/wait` | Token | Dequeue one task (blocking) |
+| **Wave 16** | | |
+| `GET /agents/list` | Token | Active agents + negotiation weights |
+| `POST /agents/register` | Token | Register a new agent perspective |
+| `POST /agents/negotiate` | Token | Run one negotiation round |
+| `GET /agents/dashboard` | Token | HTML multi-agent dashboard |
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Check |
-|--------|--------|
-| Lab shows “offline preview” or toast “Offline or unreachable” | Backend up? `curl` / `GET /api/boggers/status` through Next returns **200**? **`BOGGERS_DASHBOARD_TOKEN`** the same on `backend` and `frontend`? Split deploy: **`BOGGERS_INTERNAL_URL`** must be reachable from the Next server. |
-| `401` on API | Set `BOGGERS_DASHBOARD_TOKEN` consistently for `backend` + `frontend`. |
-| Answers feel repeated / `[throttle]` in text | Lower **`inference.throttle_seconds`** in config (or wait between Lab queries). |
-| Ollama errors | `docker compose exec ollama ollama pull llama3.2` and embedding model per `config.docker.yaml`. |
-| SQLite permission errors | `/data` volume; entrypoint `chown`s for user `boggers`. |
-| Agent queue / Redis errors in logs | Ensure `redis` is up in compose, or set `REDIS_URL` for local Redis; multi-agent falls back to memory if Redis is unavailable (see [`docs/WAVE13.md`](docs/WAVE13.md)). |
+| Symptom | Fix |
+|---------|-----|
+| Lab shows "Offline or unreachable" | `docker compose ps` — all healthy? `BOGGERS_DASHBOARD_TOKEN` must match `backend` and `frontend`. `curl http://localhost:8000/health/live` |
+| `401 Unauthorized` | Set `BOGGERS_DASHBOARD_TOKEN` in `.env`, then `docker compose up -d --force-recreate` |
+| Answers feel repeated / `[throttle]` | Lower `inference.throttle_seconds` in `config.docker.yaml`, then `docker compose restart backend` |
+| Ollama errors / no LLM answer | `docker compose exec ollama ollama pull llama3.2` — wait for download |
+| High memory usage | Reduce `guardrails.max_nodes` in config; add swap (see [VPS step 2](#2-add-swap-important-for-ollama-on-low-ram-servers)) |
+| TLS / Caddy fails | DNS must point to VPS before Let's Encrypt will issue cert; check `docker compose --profile tls logs caddy` |
+| Agent negotiation returns no results | Needs ≥2 active agents + graph tension > 0. Run `POST /query` first to generate graph activity, then `POST /agents/negotiate` |
+| Wave 15 WASM shows "TypeScript" badge | Expected — TypeScript fallback is identical math. Build native WASM: `bash scripts/build-wasm.sh` (needs Rust + wasm-pack) |
+| Redis errors | Redis is optional; agents fall back to in-memory queue automatically |
+| Distributed sharding 404 | Set `BOGGERS_DISTRIBUTED_ENABLED=1` in `.env`, then rebuild |
 
 ---
 
 ## Documentation index
 
-- **[docs/README.md](docs/README.md)** — table of VPS + Wave 13 + Wave 15 docs.
+| Doc | Contents |
+|-----|----------|
+| [`docs/VPS.md`](docs/VPS.md) | Firewall, swap, backups, systemd, secrets, rate limiting |
+| [`docs/WAVE13.md`](docs/WAVE13.md) | Distributed sharding: ShardCoordinator, ShardedGraphLayer, Redis pub/sub |
+| [`docs/WAVE15.md`](docs/WAVE15.md) | WASM port: Rust WaveGraph, TypeScript mirror, browser query fallback |
+| [`docs/WAVE16.md`](docs/WAVE16.md) | Multi-agent: AgentRegistry, AgentNegotiator, negotiation protocol |
 
 ---
 
 ## License
 
-Upstream projects retain their own licenses (e.g. MIT for BoggersTheAI as published). This integration layer follows the same spirit; confirm `LICENSE` files under `backend/` and `frontend/` for exact terms.
+Upstream projects retain their own licenses (BoggersTheAI: MIT). This integration layer follows the same spirit; see `LICENSE` files under `backend/` and `frontend/` for exact terms.
 
 ---
 
-**Maintainers:** keep this README updated when changing compose services, env vars, or proxy paths so [boggersthefish.com](https://boggersthefish.com) Wave 14 “Docker one-click” stays honest with what ships in this repo.
+*Keep this README updated when changing compose services, env vars, or proxy paths.*

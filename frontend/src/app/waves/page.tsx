@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { WAVE_LOG, REPOS } from "@/lib/tsData";
 import { cn } from "@/lib/utils";
+import { MultiAgentPanel } from "@/components/sections/MultiAgentPanel";
 
 export const metadata: Metadata = {
   title: "Waves — BoggersTheFish",
@@ -172,6 +173,68 @@ export default function WavesPage() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="ts-divider mx-auto max-w-4xl" />
+
+      {/* Wave 16 — Multi-Agent Dashboard */}
+      <section className="py-16 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="mb-6">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-ts-purple/30 bg-ts-purple/5 text-xs font-mono text-ts-purple mb-4">
+              <Zap className="w-3 h-3" />
+              Wave 16 — Live
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">Multi-Agent Coordination</h2>
+            <p className="text-muted-foreground text-sm max-w-xl">
+              Multiple TS agent perspectives share the global graph. Each negotiation round
+              uses wave tension as currency — the most unstable nodes get contested first.
+              Winning agents gain stronger graph influence edges.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <MultiAgentPanel />
+            <div className="space-y-3">
+              <div className="ts-card p-4 text-xs text-muted-foreground space-y-2">
+                <div className="font-mono text-ts-purple-light font-semibold text-[11px] mb-2">
+                  Negotiation Protocol
+                </div>
+                {[
+                  ["Tension detection", "top-k tense nodes become contested"],
+                  ["Competitive bidding", "bid = budget × weight × tension"],
+                  ["Winner selection", "highest bid pushes activation +amount"],
+                  ["Edge weight update", "winner +0.08, losers −0.04"],
+                  ["Registry update", "wins boost negotiation_weight"],
+                ].map(([step, desc]) => (
+                  <div key={step} className="flex gap-2">
+                    <span className="text-ts-purple font-mono w-32 flex-shrink-0">{step}</span>
+                    <span className="text-muted-foreground/70">{desc}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="ts-card p-4 text-xs text-muted-foreground">
+                <div className="font-mono text-ts-purple-light font-semibold text-[11px] mb-2">
+                  Built-in Agent Roles
+                </div>
+                {[
+                  ["explorer", "exploration", "0.60"],
+                  ["consolidator", "consolidation", "0.50"],
+                  ["synthesizer", "synthesis", "0.55"],
+                ].map(([id, role, budget]) => (
+                  <div key={id} className="flex items-center gap-2 py-0.5">
+                    <span className="font-mono text-white w-20">{id}</span>
+                    <span className="text-muted-foreground/60 flex-1">{role}</span>
+                    <span className="font-mono text-ts-purple/70">budget {budget}</span>
+                  </div>
+                ))}
+                <p className="text-[10px] text-muted-foreground/50 mt-2">
+                  POST /agents/register to add custom agents.
+                  GET /agents/dashboard for the full HTML view.
+                </p>
+              </div>
             </div>
           </div>
         </div>

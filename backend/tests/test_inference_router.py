@@ -47,7 +47,8 @@ def test_throttle_blocks_rapid_calls():
     assert "stub:q1" in first
 
     second = router.synthesize("ctx", "q2")
-    assert "[throttle]" in second
+    # Throttle reuses prior clean result (no [throttle] debug line for Lab)
+    assert second == first
 
 
 def test_fallback_used_on_primary_failure():

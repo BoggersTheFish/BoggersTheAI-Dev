@@ -4,6 +4,7 @@ import copy
 import heapq
 import json
 import logging
+import os
 import threading
 import time
 from dataclasses import asdict
@@ -53,6 +54,15 @@ class UniversalLivingGraph:
 
             db_path = self._resolve_sqlite_path(config)
             self._sqlite_backend = SQLiteGraphBackend(db_path)
+
+        # Wave 13 — Distributed Sharding:
+        # When enabled, ShardedGraphLayer replaces the single SQLite backend for
+        # persistence.  The in-memory graph (self.nodes) stays unified so that
+        # wave propagation, emergence, and stability scoring work unchanged.
+        self._sharded_backend = None
+        dist_cfg = self._resolve_distributed_config(config)
+        if dist_cfg.get("enabled", False):
+            self._init_sharded_backend(dist_cfg)
 
         if auto_load:
             self.load()
@@ -123,6 +133,91 @@ class UniversalLivingGraph:
             return str(runtime.get("sqlite_path", "graph.db"))
         return "graph.db"
 
+    # ------------------------------------------------------------------
+    # Wave 13 — Distributed config helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_distributed_config(self, config: object | None) -> dict:
+        """
+        Merge distributed_graph config section with BOGGERS_* env-var overrides.
+        Env vars always win so Docker Compose / .env settings take effect without
+        touching config.yaml.
+        """
+        env_enabled = os.environ.get(
+            "BOGGERS_DISTRIBUTED_ENABLED", ""
+        ).strip().lower() in ("1", "true", "yes")
+        defaults: dict = {
+            "enabled": env_enabled,
+            "shard_count": int(os.environ.get("BOGGERS_SHARD_COUNT", "4")),
+            "global_max_nodes": int(os.environ.get("BOGGERS_GLOBAL_MAX_NODES", "100000")),
+            "per_shard_max_nodes": int(
+                os.environ.get("BOGGERS_PER_SHARD_MAX_NODES", "25000")
+            ),
+            "redis_url": os.environ.get("REDIS_URL", ""),
+        }
+        if config is None:
+            return defaults
+        cfg_dist: dict = {}
+        if isinstance(config, dict):
+            cfg_dist = config.get("distributed_graph", {}) or {}
+        else:
+            cfg_dist = getattr(config, "distributed_graph", None) or {}
+        if isinstance(cfg_dist, dict):
+            merged = {**defaults, **cfg_dist}
+            # env vars override config file
+            if env_enabled:
+                merged["enabled"] = True
+            for env_key, field in (
+                ("BOGGERS_SHARD_COUNT", "shard_count"),
+                ("BOGGERS_GLOBAL_MAX_NODES", "global_max_nodes"),
+                ("BOGGERS_PER_SHARD_MAX_NODES", "per_shard_max_nodes"),
+                ("REDIS_URL", "redis_url"),
+            ):
+                val = os.environ.get(env_key, "").strip()
+                if val:
+                    merged[field] = int(val) if field != "redis_url" else val
+            return merged
+        return defaults
+
+    def _init_sharded_backend(self, dist_cfg: dict) -> None:
+        """
+        Create ShardedGraphLayer and attach it as the persistence backend.
+        Errors here fall back gracefully to the single SQLite backend.
+
+        TS Logic: Sharding is transparent to the wave engine — the in-memory
+        graph is always unified. ShardedGraphLayer only affects how nodes are
+        written to and read from disk.
+        """
+        try:
+            from ..distributed.coordinator import ShardCoordinator
+            from ..distributed.sharded_graph import ShardedGraphLayer
+
+            redis_url = str(dist_cfg.get("redis_url", "")).strip() or None
+            coordinator = ShardCoordinator(
+                shard_count=int(dist_cfg.get("shard_count", 4)),
+                global_max_nodes=int(dist_cfg.get("global_max_nodes", 100000)),
+                per_shard_max_nodes=int(dist_cfg.get("per_shard_max_nodes", 25000)),
+                redis_url=redis_url,
+            )
+            sqlite_path = self._resolve_sqlite_path(self.config)
+            self._sharded_backend = ShardedGraphLayer(
+                coordinator=coordinator,
+                base_db_path=sqlite_path,
+                redis_url=redis_url,
+            )
+            logger.info(
+                "Wave 13: distributed sharding ENABLED — %d shards, base=%s",
+                coordinator.shard_count,
+                sqlite_path,
+            )
+        except Exception as exc:
+            logger.error(
+                "Wave 13: failed to init ShardedGraphLayer, "
+                "falling back to single SQLite: %s",
+                exc,
+            )
+            self._sharded_backend = None
+
     def snapshot_read(self) -> tuple[Dict[str, Node], List[Edge]]:
         with self._lock:
             nodes_copy = {nid: copy.deepcopy(n) for nid, n in self.nodes.items()}
@@ -136,7 +231,11 @@ class UniversalLivingGraph:
             count = len(self._dirty_nodes)
             dirty = [self.nodes[nid] for nid in self._dirty_nodes if nid in self.nodes]
             self._dirty_nodes.clear()
-            if self._sqlite_backend:
+            # Wave 13: route through sharded backend if active
+            if self._sharded_backend is not None:
+                self._sharded_backend.save_nodes_batch(dirty)
+                self._sharded_backend.save_edges_batch(self.edges)
+            elif self._sqlite_backend:
                 self._sqlite_backend.save_nodes_batch(dirty)
                 self._sqlite_backend.save_edges_batch(self.edges)
             else:
@@ -419,6 +518,23 @@ class UniversalLivingGraph:
             self._apply_graph_node_updates(graph_nodes)
             self._adjacency = adjacency
             self._sync_edges_from_tuples(edges)
+
+            # Wave 13: cross-shard tension propagation via Redis pub/sub.
+            # After each wave cycle, if distributed sharding is active we publish
+            # high-tension nodes so other shard partitions / replicas can react.
+            if self._sharded_backend is not None:
+                tensions = self.detect_tensions()
+                if tensions:
+                    high_tension_nodes = sorted(
+                        tensions.keys(), key=lambda k: -tensions[k]
+                    )[:5]
+                    max_t = max(tensions.values())
+                    self._sharded_backend.broadcast_tension(
+                        shard_id=0,
+                        high_tension_nodes=high_tension_nodes,
+                        max_tension=max_t,
+                    )
+
             return result
 
     def _check_guardrails(self) -> str | None:
@@ -441,6 +557,14 @@ class UniversalLivingGraph:
 
     def save(self, path: str | Path | None = None) -> Path:
         with self._lock:
+            # Wave 13: sharded backend takes priority over single SQLite
+            if self._sharded_backend is not None and path is None:
+                nodes_list = list(self.nodes.values())
+                self._sharded_backend.save_nodes_batch(nodes_list)
+                self._sharded_backend.save_edges_batch(self.edges)
+                self._dirty_nodes.clear()
+                first_shard = self._sharded_backend._shards[0]
+                return Path(first_shard.db_path).parent / "graph_sharded"
             if self._sqlite_backend and path is None:
                 nodes_list = list(self.nodes.values())
                 self._sqlite_backend.save_nodes_batch(nodes_list)
@@ -459,6 +583,9 @@ class UniversalLivingGraph:
     def load(self, path: str | Path | None = None) -> "UniversalLivingGraph":
         # Note: add_node() re-acquires self._lock; safe because _lock is an RLock
         with self._lock:
+            # Wave 13: sharded load takes priority over single SQLite
+            if self._sharded_backend is not None and path is None:
+                return self._load_from_sharded()
             if self._sqlite_backend and path is None:
                 return self._load_from_sqlite()
             target = Path(path) if path is not None else self.graph_path
@@ -521,6 +648,39 @@ class UniversalLivingGraph:
         )
         return self
 
+    def _load_from_sharded(self) -> "UniversalLivingGraph":
+        """
+        Wave 13: Fan out to all shards and merge into the unified in-memory graph.
+        Called once at startup when BOGGERS_DISTRIBUTED_ENABLED=1.
+
+        TS Logic: After loading, the wave engine, emergence rules, and stability
+        scoring all operate on the merged in-memory graph exactly as before —
+        sharding is invisible above this layer.
+        """
+        self.nodes.clear()
+        self.edges.clear()
+        self._adjacency.clear()
+        self._topic_index.clear()
+        loaded_nodes = self._sharded_backend.load_all_nodes()
+        for node in loaded_nodes.values():
+            self.nodes[node.id] = node
+            self._adjacency.setdefault(node.id, {})
+            for topic in node.topics:
+                self._topic_index.setdefault(topic, set()).add(node.id)
+        loaded_edges = self._sharded_backend.load_all_edges()
+        for edge in loaded_edges:
+            if edge.src in self.nodes and edge.dst in self.nodes:
+                self.edges.append(edge)
+                self._adjacency.setdefault(edge.src, {})[edge.dst] = edge.weight
+        self._dirty_nodes.clear()
+        logger.info(
+            "Wave 13: loaded %d nodes, %d edges from %d shards",
+            len(self.nodes),
+            len(self.edges),
+            self._sharded_backend._shard_count,
+        )
+        return self
+
     def save_graph_snapshot(self, label: str = "") -> Path | None:
         from .snapshots import GraphSnapshotManager
 
@@ -580,7 +740,7 @@ class UniversalLivingGraph:
 
     def get_wave_status(self) -> dict:
         runner = self._wave_runner
-        return {
+        status = {
             "cycle_count": runner.cycle_count if runner else 0,
             "thread_alive": runner.is_alive if runner else False,
             "nodes": len(self.nodes),
@@ -590,6 +750,12 @@ class UniversalLivingGraph:
             "cycles_this_hour": self._cycles_this_hour,
             "backend": "sqlite" if self._sqlite_backend else "json",
         }
+        # Wave 13: enrich status with shard info when distributed mode is active
+        if self._sharded_backend is not None:
+            status["backend"] = "sharded"
+            status["distributed"] = True
+            status["shard_count"] = self._sharded_backend._shard_count
+        return status
 
     def get_metrics(self) -> dict:
         active = [n for n in self.nodes.values() if not n.collapsed]

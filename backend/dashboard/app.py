@@ -394,7 +394,9 @@ def post_query(
 def _register_wave13() -> None:
     from BoggersTheAI.dashboard.wave13_routes import register_wave13_routes
 
-    register_wave13_routes(app, _check_auth)
+    # Wave 13: pass get_runtime so /distributed/shards and /distributed/tension
+    # can read live shard stats directly from the graph's ShardedGraphLayer.
+    register_wave13_routes(app, _check_auth, get_runtime_fn=get_runtime)
 
 
 _register_wave13()
