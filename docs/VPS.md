@@ -1,10 +1,13 @@
-# VPS runbook — ts-os (Wave 14 Docker)
+# VPS runbook — BoggersTheAI-Dev (Docker)
+
+Stack: **Ollama**, **Redis** (Wave 13 multi-agent), **BoggersTheAI** (FastAPI), **Next.js**, optional **Caddy** (TLS). See root [`docker-compose.yml`](../docker-compose.yml).
 
 ## Ports
 
 - **3000** — Next.js (primary UI; proxies `/api/boggers/*` to FastAPI with `BOGGERS_DASHBOARD_TOKEN` server-side).
 - **8000** — BoggersTheAI FastAPI (optional public exposure; prefer only via Next proxy or Caddy).
 - **11434** — Ollama API (do not expose publicly; keep on private network / firewall).
+- **6379** — Redis — **not** published to the host in the default compose file (internal Docker network only). Do not expose Redis to the public internet.
 - **80 / 443** — optional Caddy (`docker compose --profile tls up -d`).
 
 ## Firewall (example: `ufw`)
@@ -36,8 +39,15 @@ Persisted state lives in Docker volumes:
 
 - `boggers-data` — SQLite `graph.db`, vault, traces, snapshots (`/data` in the backend container).
 - `ollama-data` — pulled models.
+- `redis-data` — optional agent task broker persistence for Wave 13 multi-agent.
 
-Backup example:
+**Scripted backup** (from repo root, respects `COMPOSE_PROJECT_NAME`):
+
+```bash
+bash scripts/backup-volumes.sh ./backups
+```
+
+Manual example:
 
 ```bash
 docker run --rm -v ts-os_boggers-data:/v -v "$(pwd)":/backup alpine \
@@ -46,7 +56,7 @@ docker run --rm -v ts-os_boggers-data:/v -v "$(pwd)":/backup alpine \
 
 ## systemd (Docker Compose unit)
 
-Run compose from a fixed path (e.g. `/opt/ts-os-public`):
+Run compose from a fixed path (e.g. `/opt/BoggersTheAI-Dev` or `/opt/ts-os-public`):
 
 ```ini
 [Unit]
@@ -57,7 +67,7 @@ Requires=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=/opt/ts-os-public
+WorkingDirectory=/opt/BoggersTheAI-Dev
 ExecStart=/usr/bin/docker compose up -d
 ExecStop=/usr/bin/docker compose down
 TimeoutStartSec=0
@@ -78,8 +88,9 @@ Pair with `restart: unless-stopped` in `docker-compose.yml` for container-level 
 
 ## Rate limiting and abuse
 
-- FastAPI: `POST /query` is limited (slowapi) per IP.
-- Edge: add a CDN or reverse-proxy rate limit (Caddy has plugins; many operators use Cloudflare or nginx `limit_req` in front).
+- FastAPI: `POST /query` is limited (slowapi) per **client IP** or **`X-Boggers-Session-ID`** when present.
+- Wave 13 **agent** tasks use Redis; keep Redis on the internal network only.
+- Edge: add a CDN or reverse-proxy rate limit (many operators use Cloudflare or nginx `limit_req` in front).
 
 ## Secrets
 

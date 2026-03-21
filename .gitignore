@@ -27,6 +27,9 @@ node_modules/
 .next/
 out/
 
+# Optional wasm-pack output (CI may generate)
+frontend/public/wasm/
+
 # OS / IDE
 .DS_Store
 Thumbs.db

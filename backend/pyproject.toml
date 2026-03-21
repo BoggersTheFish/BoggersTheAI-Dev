@@ -66,6 +66,9 @@ adapters = [
 security = [
   "defusedxml",
 ]
+agents = [
+  "redis>=4.5.0",
+]
 
 [project.scripts]
 boggers = "BoggersTheAI.interface.chat:run_chat"
@@ -78,6 +81,8 @@ packages = [
   "BoggersTheAI.adapters",
   "BoggersTheAI.core",
   "BoggersTheAI.core.graph",
+  "BoggersTheAI.core.distributed",
+  "BoggersTheAI.core.agents",
   "BoggersTheAI.dashboard",
   "BoggersTheAI.entities",
   "BoggersTheAI.interface",

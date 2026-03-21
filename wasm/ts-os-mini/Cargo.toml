@@ -1,0 +1,11 @@
+[package]
+name = "ts-os-mini"
+version = "0.1.0"
+edition = "2021"
+description = "Wave 15 — minimal TS-OS wave math in WebAssembly (browser, no install)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"

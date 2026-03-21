@@ -10,7 +10,7 @@ RUN apt-get update \
 # Non-editable install so the image is self-contained (no bind-mount to site-packages).
 COPY . .
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir ".[llm,adapters]" \
+    && pip install --no-cache-dir ".[llm,adapters,agents]" \
         "fastapi>=0.110" \
         "uvicorn[standard]>=0.27" \
         "rich>=13" \

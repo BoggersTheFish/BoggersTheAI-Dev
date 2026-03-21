@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -17,6 +17,13 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from BoggersTheAI import BoggersRuntime
 from BoggersTheAI.core.metrics import metrics as metrics_collector
+
+def _session_or_ip_key(request: Request) -> str:
+    sid = request.headers.get("x-boggers-session-id")
+    if sid:
+        return f"session:{sid[:128]}"
+    return get_remote_address(request)
+
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -307,6 +314,30 @@ def graph_viz(_: None = Depends(_check_auth)) -> str:
 </html>"""
 
 
+@app.get("/metrics/prometheus", response_class=Response)
+def metrics_prometheus(_: None = Depends(_check_auth)) -> Response:
+    """Prometheus text exposition (scrape behind auth)."""
+    lines: list[str] = []
+    try:
+        from BoggersTheAI.dashboard.wave13_routes import _load_agents
+
+        depth = _load_agents().queue_depth()
+    except Exception:
+        depth = -1
+    lines.append("# HELP boggers_agent_queue_depth Agent task queue depth")
+    lines.append("# TYPE boggers_agent_queue_depth gauge")
+    lines.append(f"boggers_agent_queue_depth {depth}")
+    with _history_lock:
+        tl = len(_tension_history)
+    lines.append("# HELP boggers_tension_history_len Samples retained for dashboard chart")
+    lines.append("# TYPE boggers_tension_history_len gauge")
+    lines.append(f"boggers_tension_history_len {tl}")
+    return Response(
+        "\n".join(lines) + "\n",
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
 @app.get("/metrics")
 def metrics_endpoint(_: None = Depends(_check_auth)) -> dict[str, Any]:
     graph_metrics = get_runtime().graph.get_metrics()
@@ -347,7 +378,7 @@ class QueryBody(BaseModel):
     query: str = Field(min_length=1, max_length=8000)
 
 
-@limiter.limit("30/minute")
+@limiter.limit("30/minute", key_func=_session_or_ip_key)
 @app.post("/query")
 def post_query(
     request: Request,
@@ -358,6 +389,15 @@ def post_query(
     from BoggersTheAI.interface.api import handle_query
 
     return handle_query({"query": body.query})
+
+
+def _register_wave13() -> None:
+    from BoggersTheAI.dashboard.wave13_routes import register_wave13_routes
+
+    register_wave13_routes(app, _check_auth)
+
+
+_register_wave13()
 
 
 def main() -> None:

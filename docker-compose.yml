@@ -1,30 +1,65 @@
 name: ts-os
 
+networks:
+  ts-os-net:
+    driver: bridge
+
 services:
   ollama:
     image: ollama/ollama:latest
+    networks:
+      - ts-os-net
     volumes:
       - ollama-data:/root/.ollama
     ports:
       - "11434:11434"
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    networks:
+      - ts-os-net
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    networks:
+      - ts-os-net
     environment:
       BOGGERS_DASHBOARD_HOST: "0.0.0.0"
       BOGGERS_DASHBOARD_PORT: "8000"
       BOGGERS_DASHBOARD_TOKEN: ${BOGGERS_DASHBOARD_TOKEN:-}
       BOGGERS_CORS_ORIGINS: ${BOGGERS_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      BOGGERS_DISTRIBUTED_ENABLED: ${BOGGERS_DISTRIBUTED_ENABLED:-0}
+      BOGGERS_SHARD_COUNT: ${BOGGERS_SHARD_COUNT:-4}
+      BOGGERS_GLOBAL_MAX_NODES: ${BOGGERS_GLOBAL_MAX_NODES:-100000}
+      BOGGERS_PER_SHARD_MAX_NODES: ${BOGGERS_PER_SHARD_MAX_NODES:-25000}
     volumes:
       - boggers-data:/data
       - ./config.docker.yaml:/app/config.yaml:ro
     depends_on:
-      - ollama
+      ollama:
+        condition: service_started
+      redis:
+        condition: service_healthy
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=4)"]
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      start_period: 90s
     restart: unless-stopped
 
   frontend:
@@ -33,6 +68,8 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_BOGGERS_API_BASE: /api/boggers
+    networks:
+      - ts-os-net
     environment:
       BOGGERS_INTERNAL_URL: http://backend:8000
       BOGGERS_DASHBOARD_TOKEN: ${BOGGERS_DASHBOARD_TOKEN:-}
@@ -40,12 +77,27 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
 
   caddy:
     profiles: ["tls"]
     image: caddy:2-alpine
+    networks:
+      - ts-os-net
     ports:
       - "80:80"
       - "443:443"
@@ -56,11 +108,13 @@ services:
     environment:
       CADDY_DOMAIN: ${CADDY_DOMAIN:-localhost}
     depends_on:
-      - frontend
+      frontend:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   ollama-data:
   boggers-data:
+  redis-data:
   caddy-data:
   caddy-config:

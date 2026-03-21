@@ -6,6 +6,12 @@ from typing import Any, Dict, List, Tuple
 
 logger = logging.getLogger("boggers.config.schema")
 
+_OPTIONAL_RANGE_CHECKS: List[Tuple[str, str, float, float]] = [
+    ("distributed_graph.shard_count", "distributed_graph", 1.0, 1024.0),
+    ("distributed_graph.global_max_nodes", "distributed_graph", 1.0, 10000000.0),
+    ("distributed_graph.per_shard_max_nodes", "distributed_graph", 1.0, 10000000.0),
+]
+
 _RANGE_CHECKS: List[Tuple[str, str, float, float]] = [
     ("wave.damping", "wave", 0.0, 1.0),
     ("wave.activation_cap", "wave", 0.01, 10.0),
@@ -34,7 +40,7 @@ def validate_config(raw: Dict[str, Any], strict: bool = False) -> List[str]:
         if section not in raw:
             warnings.append(f"Missing recommended section: '{section}'")
 
-    for label, section, lo, hi in _RANGE_CHECKS:
+    for label, section, lo, hi in _RANGE_CHECKS + _OPTIONAL_RANGE_CHECKS:
         parts = label.split(".")
         value = raw
         for part in parts:

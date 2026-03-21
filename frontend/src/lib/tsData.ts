@@ -216,6 +216,7 @@ export const NAV_LINKS = [
   { href: "/ts-os", label: "TS-OS", section: "ts-os" },
   { href: "/projects", label: "Projects", section: "projects" },
   { href: "/lab", label: "Lab", section: "lab" },
+  { href: "/wasm", label: "WASM", section: "wasm" },
   { href: "/waves", label: "Waves", section: "waves" },
   { href: "/network", label: "Network", section: "network" },
 ] as const;
@@ -232,10 +233,10 @@ export const WAVE_LOG = [
   { wave: 9, name: "Memory Layer", date: "2025-04", status: "complete", description: "BoggersTheMind: episodic + semantic memory." },
   { wave: 10, name: "Core Engine", date: "2025-07", status: "complete", description: "TS-Core extracted as standalone library." },
   { wave: 11, name: "Pulse + Observability", date: "2025-10", status: "complete", description: "FastAPI dashboard, Cytoscape.js, Chart.js, Rich TUI." },
-  { wave: 12, name: "Pages Island LIVE", date: "2026-03", status: "current", description: "BoggersTheAI v0.5: 200+ tests, QLoRA, multimodal. THIS SITE." },
-  { wave: 13, name: "Distributed Graph", date: "2026-Q2", status: "next", description: "Sharding for >10k nodes. Multi-agent coordination." },
-  { wave: 14, name: "Docker One-Click", date: "2026-Q3", status: "roadmap", description: "Single docker-compose up to spin up the full OS." },
-  { wave: 15, name: "WASM Port", date: "2026-Q4", status: "roadmap", description: "WebAssembly version. TS-OS in the browser, no install." },
+  { wave: 12, name: "Pages Island LIVE", date: "2026-03", status: "complete", description: "BoggersTheAI v0.5: 200+ tests, QLoRA, multimodal. THIS SITE." },
+  { wave: 13, name: "Distributed Graph", date: "2026-Q2", status: "complete", description: "Sharding + multi-agent APIs in BoggersTheAI-Dev (coordinator, Redis optional)." },
+  { wave: 14, name: "Docker One-Click", date: "2026-Q3", status: "complete", description: "docker compose up — full stack in BoggersTheAI-Dev." },
+  { wave: 15, name: "WASM Port", date: "2026-Q4", status: "current", description: "Browser TS-OS Mini + Rust wasm/ts-os-mini (wasm-pack). /wasm" },
 ] as const;
 
 export const SITE_META = {

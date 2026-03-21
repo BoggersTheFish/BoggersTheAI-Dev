@@ -139,3 +139,13 @@ deployment_tiers:
     graph: "local-plus-sync"
     inference: "api-fallback"
     throttle_seconds: 10
+
+# Wave 13 — Distributed Graph (logical coordinator; env BOGGERS_* overrides at runtime)
+distributed_graph:
+  enabled: false
+  shard_count: 4
+  global_max_nodes: 100000
+  per_shard_max_nodes: 25000
+
+multi_agent:
+  enabled: true
