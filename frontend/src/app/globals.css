@@ -1,0 +1,195 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --radius: 0.5rem;
+  }
+
+  * {
+    border-color: rgba(160, 32, 240, 0.2);
+  }
+
+  body {
+    @apply bg-black text-[#F0F0F0];
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    color-scheme: dark;
+  }
+
+  /* Purple scrollbar */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #000;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #A020F0;
+    border-radius: 2px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #C060FF;
+  }
+
+  ::selection {
+    background: rgba(160, 32, 240, 0.3);
+    color: #fff;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply tracking-tight;
+  }
+}
+
+@layer components {
+  /* Animated purple grid background */
+  .ts-grid-bg {
+    background-image:
+      linear-gradient(rgba(160, 32, 240, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(160, 32, 240, 0.04) 1px, transparent 1px);
+    background-size: 50px 50px;
+  }
+
+  /* Node glow shell */
+  .ts-node {
+    @apply relative rounded-full border border-ts-purple/30;
+    box-shadow: 0 0 10px rgba(160, 32, 240, 0.3), inset 0 0 10px rgba(160, 32, 240, 0.1);
+  }
+  .ts-node.active {
+    box-shadow: 0 0 20px rgba(160, 32, 240, 0.8), 0 0 40px rgba(160, 32, 240, 0.4), inset 0 0 20px rgba(160, 32, 240, 0.2);
+    border-color: rgba(160, 32, 240, 0.8);
+  }
+
+  /* Text glow */
+  .ts-text-glow {
+    text-shadow: 0 0 10px rgba(160, 32, 240, 0.5), 0 0 20px rgba(160, 32, 240, 0.3);
+  }
+  .ts-text-glow-strong {
+    text-shadow: 0 0 10px #A020F0, 0 0 20px #A020F0, 0 0 40px rgba(160, 32, 240, 0.5);
+  }
+
+  /* Card */
+  .ts-card {
+    @apply bg-[#080808] border border-[rgba(160,32,240,0.2)] rounded-lg;
+    box-shadow: 0 0 0 1px rgba(160, 32, 240, 0.08), 0 4px 20px rgba(0, 0, 0, 0.6);
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  }
+  .ts-card:hover {
+    border-color: rgba(160, 32, 240, 0.35);
+    box-shadow: 0 0 0 1px rgba(160, 32, 240, 0.2), 0 8px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(160, 32, 240, 0.08);
+  }
+
+  /* Gradient text */
+  .ts-gradient-text {
+    background: linear-gradient(135deg, #C060FF 0%, #A020F0 50%, #8B00FF 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .ts-gradient-text-animated {
+    background: linear-gradient(135deg, #C060FF, #A020F0, #8B00FF, #A020F0, #C060FF);
+    background-size: 300% 300%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: wave-flow 5s ease-in-out infinite;
+  }
+
+  /* Section spacing */
+  .ts-section {
+    @apply py-24 px-4 sm:px-6 lg:px-8 relative;
+  }
+
+  /* Horizontal divider */
+  .ts-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(160, 32, 240, 0.35), transparent);
+  }
+
+  /* Activation ring (click effect) */
+  .ts-activation-ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 1px solid rgba(160, 32, 240, 0.6);
+    pointer-events: none;
+    animation: propagate 1.2s ease-out forwards;
+  }
+
+  /* Code block */
+  .ts-code {
+    @apply font-mono text-sm bg-[#0A0A0A] border border-[rgba(160,32,240,0.2)] rounded-lg p-4;
+    color: #C060FF;
+  }
+}
+
+/* ──────────────────────────────────────────────
+   Custom keyframes (not covered by Tailwind config)
+   ────────────────────────────────────────────── */
+@keyframes wave-flow {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes propagate {
+  0%   { transform: scale(1);   opacity: 1; }
+  100% { transform: scale(3.5); opacity: 0; }
+}
+
+@keyframes grid-pulse {
+  0%, 100% { opacity: 0.4; }
+  50%       { opacity: 0.9; }
+}
+
+@keyframes float-node {
+  0%, 100% { transform: translateY(0px); }
+  33%       { transform: translateY(-10px); }
+  66%       { transform: translateY(5px); }
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+/* ──────────────────────────────────────────────
+   Light mode — stability flip (purple stays)
+   ────────────────────────────────────────────── */
+html.light {
+  body {
+    background-color: #0a0a12;
+    color: #e8e8f0;
+  }
+  .ts-card {
+    background-color: #0f0f1a;
+    border-color: rgba(160, 32, 240, 0.25);
+  }
+  .ts-grid-bg {
+    background-image:
+      linear-gradient(rgba(160, 32, 240, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(160, 32, 240, 0.06) 1px, transparent 1px);
+  }
+}
+
+/* ──────────────────────────────────────────────
+   Utility overrides
+   ────────────────────────────────────────────── */
+.font-mono {
+  font-feature-settings: "liga" 1, "calt" 1;
+}
+
+/* Scroll-triggered reveal */
+@keyframes reveal-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.reveal-up {
+  animation: reveal-up 0.6s ease-out forwards;
+}

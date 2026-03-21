@@ -1,0 +1,138 @@
+modules:
+  core: true
+  adapters: true
+  tools: true
+  multimodal: true
+  consolidation_insight: true
+  interface: true
+
+inference:
+  mode: "local"
+  local_engine: "boggers_synthesis"
+  remote_fallback: "disabled"
+  throttle_seconds: 60
+  ollama:
+    enabled: true
+    base_url: "http://localhost:11434"
+    model: "llama3.2"
+    temperature: 0.3
+    max_tokens: 512
+  self_improvement:
+    trace_logging_enabled: true
+    min_confidence_for_log: 0.7
+    traces_dir: "traces"
+    dataset_build:
+      min_confidence: 0.75
+      max_samples: 5000
+      output_dir: "dataset"
+      split_ratio: 0.8
+    fine_tuning:
+      enabled: false
+      base_model: "unsloth/llama-3.2-1b-instruct"
+      max_seq_length: 2048
+      learning_rate: 2e-4
+      epochs: 1
+      adapter_save_path: "models/fine_tuned_adapter"
+      auto_hotswap: true
+      auto_schedule: false
+      min_new_traces: 50
+      validation_enabled: true
+      max_memory_gb: 12
+      safety_dry_run: true
+      backup_dir: "models/backups"
+      supported_models:
+        - "unsloth/llama-3.2-1b-instruct"
+        - "unsloth/Phi-3-mini-4k-instruct"
+        - "unsloth/gemma-2-2b-it"
+  synthesis:
+    use_graph_subgraph: true
+    top_k_nodes: 5
+    max_retries: 2
+
+adapters:
+  enabled:
+    wikipedia: true
+    rss: true
+    hacker_news: true
+    vault: true
+    x_api: false
+
+tools:
+  enabled:
+    search: true
+    calc: true
+    code_run: true
+    file_read: true
+  code_run_timeout_seconds: 5
+  code_run_sandbox: true
+
+multimodal:
+  voice_in_backend: "faster-whisper"
+  voice_out_backend: "piper"
+  image_in_backend: "blip2"
+
+runtime:
+  graph_path: "./graph.json"
+  graph_backend: "sqlite"
+  sqlite_path: "./graph.db"
+  insight_vault_path: "./vault"
+  max_hypotheses_per_cycle: 2
+  session_id: "auto"
+  snapshot_dir: "snapshots"
+
+wave:
+  interval_seconds: 30
+  enabled: true
+  log_each_cycle: true
+  auto_save: true
+  damping: 0.95
+  activation_cap: 1.0
+  semantic_weight: 0.3
+  incremental_save_interval: 5
+  spread_factor: 0.10
+  relax_decay: 0.85
+  tension_threshold: 0.20
+  prune_threshold: 0.25
+  temperament: "default"
+
+os_loop:
+  enabled: true
+  interval_seconds: 60
+  idle_threshold_seconds: 120
+  autonomous_modes: ["exploration", "consolidation", "insight"]
+  nightly_hour_utc: 3
+  consolidation_on_shutdown: true
+  multi_turn_enabled: true
+
+tui:
+  enabled: false
+  theme: "matrix"
+
+autonomous:
+  exploration_strength: 0.3
+  consolidation_prune_threshold: 0.2
+  insight_min_tension: 0.8
+
+guardrails:
+  max_nodes: 5000
+  max_cycles_per_hour: 200
+  high_tension_pause: 0.95
+
+embeddings:
+  enabled: true
+  model: "nomic-embed-text"
+  embed_on_creation: true
+
+deployment_tiers:
+  laptop:
+    graph: "local-json"
+    inference: "local-3b-equivalent"
+    throttle_seconds: 60
+  desktop:
+    graph: "local-json"
+    inference: "local-7b-equivalent"
+    throttle_seconds: 30
+  cloud_burst:
+    graph: "local-plus-sync"
+    inference: "api-fallback"
+    throttle_seconds: 10

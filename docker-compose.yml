@@ -1,0 +1,66 @@
+name: ts-os
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      BOGGERS_DASHBOARD_HOST: "0.0.0.0"
+      BOGGERS_DASHBOARD_PORT: "8000"
+      BOGGERS_DASHBOARD_TOKEN: ${BOGGERS_DASHBOARD_TOKEN:-}
+      BOGGERS_CORS_ORIGINS: ${BOGGERS_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+    volumes:
+      - boggers-data:/data
+      - ./config.docker.yaml:/app/config.yaml:ro
+    depends_on:
+      - ollama
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_BOGGERS_API_BASE: /api/boggers
+    environment:
+      BOGGERS_INTERNAL_URL: http://backend:8000
+      BOGGERS_DASHBOARD_TOKEN: ${BOGGERS_DASHBOARD_TOKEN:-}
+      NEXT_PUBLIC_BOGGERS_API_BASE: /api/boggers
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  caddy:
+    profiles: ["tls"]
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:-localhost}
+    depends_on:
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  ollama-data:
+  boggers-data:
+  caddy-data:
+  caddy-config:

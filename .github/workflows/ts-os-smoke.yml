@@ -1,0 +1,22 @@
+name: ts-os docker smoke
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate compose file
+        run: docker compose -f docker-compose.yml config
+
+      - name: Build backend image
+        run: docker build -t ts-os-backend:test ./backend
+
+      - name: Build frontend image
+        run: docker build -t ts-os-frontend:test ./frontend
