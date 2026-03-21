@@ -11,18 +11,19 @@ This repository tracks **[boggersthefish.com](https://boggersthefish.com)** road
 1. [Why this repo exists](#why-this-repo-exists)
 2. [Roadmap alignment](#roadmap-alignment)
 3. [Architecture](#architecture)
-4. [Repository layout](#repository-layout)
-5. [Prerequisites](#prerequisites)
-6. [Quick start: Docker (recommended)](#quick-start-docker-recommended)
-7. [Local development (without Docker)](#local-development-without-docker)
-8. [Configuration](#configuration)
-9. [Networking and security](#networking-and-security)
-10. [API surface](#api-surface)
-11. [Production deployment](#production-deployment)
-12. [Staying in sync with upstream](#staying-in-sync-with-upstream)
-13. [Troubleshooting](#troubleshooting)
-14. [Documentation index](#documentation-index)
-15. [License](#license)
+4. [How the website, Lab, and AI connect](#how-the-website-lab-and-ai-connect)
+5. [Repository layout](#repository-layout)
+6. [Prerequisites](#prerequisites)
+7. [Quick start: Docker (recommended)](#quick-start-docker-recommended)
+8. [Local development (without Docker)](#local-development-without-docker)
+9. [Configuration](#configuration)
+10. [Networking and security](#networking-and-security)
+11. [API surface](#api-surface)
+12. [Production deployment](#production-deployment)
+13. [Staying in sync with upstream](#staying-in-sync-with-upstream)
+14. [Troubleshooting](#troubleshooting)
+15. [Documentation index](#documentation-index)
+16. [License](#license)
 
 ---
 
@@ -87,6 +88,38 @@ flowchart TB
 - **Next.js route handler** forwards to `BOGGERS_INTERNAL_URL` (e.g. `http://backend:8000`) and attaches `BOGGERS_DASHBOARD_TOKEN` when set.
 - **Backend** reads `config.yaml` (Docker: bind-mounted [`config.docker.yaml`](config.docker.yaml)) with `inference.ollama.base_url` pointing at the **`ollama`** service.
 - **Persistent data**: named volume for `/data` (SQLite `graph.db`, vault, traces, snapshots) and volume for Ollama model cache.
+
+---
+
+## How the website, Lab, and AI connect
+
+This repo is what powers a **live** [boggersthefish.com](https://boggersthefish.com)-style deployment: the **marketing site and Lab are Next.js**; the **Thinking System runtime is BoggersTheAI** (Python) plus **Ollama** for LLM/embeddings and **Redis** for Wave 13 multi-agent. Nothing in the **browser** should call Ollama directly—the **Next.js server** is the only client that talks to FastAPI on the internal URL.
+
+### Request path (what visitors hit)
+
+| Visitor action | Browser calls | Next.js | Backend | Models / data |
+|----------------|---------------|---------|---------|----------------|
+| Open any page | `GET /…` | Renders UI | — | — |
+| **Lab** — live wave stats | `GET /api/boggers/status` | [`api/boggers/[...path]`](frontend/src/app/api/boggers/%5B...path%5D/route.ts) proxies | `GET /status` | Graph + wave state |
+| **Lab** — “Push a Node” | `POST /api/boggers/query` | Same proxy + **Bearer token** | `POST /query` → `handle_query` | Graph + **Ollama** synthesis per [`config.docker.yaml`](config.docker.yaml) |
+| **Wave 15** — TS-OS Mini | `GET /wasm` (+ WASM assets) | Serves page / `public/wasm` | Optional: none for static demo | Browser WASM or prebuilt pack |
+
+The browser always uses **same-origin** URLs (`/api/boggers/...`). The **`BOGGERS_DASHBOARD_TOKEN`** is added **only on the server** when proxying; it is **not** exposed as `NEXT_PUBLIC_*`.
+
+### What “AI is working” means
+
+1. **Containers healthy** — `docker compose ps`; backend healthcheck passes.
+2. **Ollama has models** — at least the chat model and embedding model named in `config.docker.yaml` (defaults: `llama3.2`, `nomic-embed-text`). Use `docker compose exec ollama ollama list` or `scripts/deploy.sh` pulls.
+3. **Token alignment** — if `BOGGERS_DASHBOARD_TOKEN` is set in `.env`, both **`backend`** and **`frontend`** services receive it so the proxy can authenticate to FastAPI.
+4. **Inference throttle** — `inference.throttle_seconds` in config can **reuse** a previous answer when queries arrive too quickly; if answers feel “stuck,” lower that value for testing (see [Configuration](#configuration)).
+
+### Deployment shapes
+
+| Shape | When to use | Wiring |
+|-------|-------------|--------|
+| **All-in-one VPS (recommended)** | Single machine for [boggersthefish.com](https://boggersthefish.com) | Compose: `frontend` → `BOGGERS_INTERNAL_URL=http://backend:8000`. Optional **Caddy** (`--profile tls`) for HTTPS on **80/443**. Use [`scripts/vps-bootstrap.sh`](scripts/vps-bootstrap.sh) or [`docs/VPS.md`](docs/VPS.md). |
+| **Docker on laptop / CI** | Development, demos | Same compose file; UI at `http://localhost:3000`. |
+| **Split: Next hosted elsewhere** | e.g. Vercel frontend, API on a VPS | The **Next server** (Node) must reach your API: set **`BOGGERS_INTERNAL_URL`** to that API’s base URL (often `https://api.yourdomain.com`). The API must accept the Bearer token and (if browser calls FastAPI directly) **`BOGGERS_CORS_ORIGINS`** must include your site origin. |
 
 ---
 
@@ -208,6 +241,7 @@ Parity note: upstream docs sometimes mention `python main.py`; this project stan
 | Concern | Source |
 |--------|--------|
 | Graph + wave + Ollama | `backend/config.yaml` locally; in Docker, [`config.docker.yaml`](config.docker.yaml) mounted as `/app/config.yaml`. |
+| Inference throttle | `inference.throttle_seconds` in YAML — limits how often **synthesis** runs; rapid Lab clicks may see reused output with a `[throttle]` note. |
 | Dashboard bind | `BOGGERS_DASHBOARD_HOST`, `BOGGERS_DASHBOARD_PORT` |
 | Auth | `BOGGERS_DASHBOARD_TOKEN` (must match between `backend` and `frontend` services when using the Next proxy). |
 | CORS (browser → FastAPI direct) | `BOGGERS_CORS_ORIGINS` (comma-separated). Prefer same-origin `/api/boggers` in production. |
@@ -248,9 +282,22 @@ Backend routes (proxied under `/api/boggers/` by Next):
 
 ## Production deployment
 
-- **Script:** [`scripts/deploy.sh`](scripts/deploy.sh)
-- **Runbook:** [`docs/VPS.md`](docs/VPS.md) — UFW, swap, volume backups, optional systemd.
-- **systemd:** [`systemd/ts-os.service`](systemd/ts-os.service) — `WorkingDirectory` should point to your clone path on the server.
+### Checklist (public site + Lab + AI)
+
+1. **Host** — Ubuntu VPS (or similar) with Docker; DNS **A/AAAA** pointing at the server for your domain.
+2. **Bootstrap** — [Ubuntu VPS one command](#ubuntu-vps--one-command-fresh-server) (`vps-bootstrap.sh`) or manual clone + `cp .env.example .env` + strong **`BOGGERS_DASHBOARD_TOKEN`**.
+3. **TLS** — `docker compose --profile tls up -d` with **`CADDY_DOMAIN`** (and **80/443** open); or terminate TLS at Cloudflare/nginx and forward to **3000**.
+4. **CORS** — set **`BOGGERS_CORS_ORIGINS`** to your real origins (the bootstrap script can set this when you pass **`--domain`**). Same-origin Lab traffic usually goes through **`/api/boggers`**; CORS matters for direct API access or split stacks.
+5. **Models** — ensure Ollama pulls match **`config.docker.yaml`** (`ollama pull` for `inference.ollama.model` and embedding model).
+6. **Firewall** — prefer **22, 80, 443** only; avoid exposing **8000**, **11434**, **6379** publicly (see [`docs/VPS.md`](docs/VPS.md)).
+7. **Persistence** — volumes **`boggers-data`**, **`ollama-data`**, **`redis-data`**; back up with [`scripts/backup-volumes.sh`](scripts/backup-volumes.sh).
+8. **Verify** — [`scripts/verify-stack.sh`](scripts/verify-stack.sh) from the server; hit **Lab** `/lab` and confirm **Push a Node** returns an answer, not “Offline or unreachable.”
+
+### Operations
+
+- **Script:** [`scripts/deploy.sh`](scripts/deploy.sh) — build, up, model pulls, quick curls.
+- **Runbook:** [`docs/VPS.md`](docs/VPS.md) — UFW, swap, backups, secrets, rate limits.
+- **systemd:** [`systemd/ts-os.service`](systemd/ts-os.service) — set **`WorkingDirectory`** to your clone (e.g. `/opt/BoggersTheAI-Dev`); install with `sudo install -m 644 systemd/ts-os.service /etc/systemd/system/ts-os.service` from repo root.
 
 ---
 
@@ -271,8 +318,9 @@ Optional reference repos for Wave 13 / theory: **TS-Core**, **BoggersThePulse**,
 
 | Symptom | Check |
 |--------|--------|
-| Lab shows “offline preview” | Backend up? `GET /api/boggers/status` via Next returns 200? Token mismatch between services? |
+| Lab shows “offline preview” or toast “Offline or unreachable” | Backend up? `curl` / `GET /api/boggers/status` through Next returns **200**? **`BOGGERS_DASHBOARD_TOKEN`** the same on `backend` and `frontend`? Split deploy: **`BOGGERS_INTERNAL_URL`** must be reachable from the Next server. |
 | `401` on API | Set `BOGGERS_DASHBOARD_TOKEN` consistently for `backend` + `frontend`. |
+| Answers feel repeated / `[throttle]` in text | Lower **`inference.throttle_seconds`** in config (or wait between Lab queries). |
 | Ollama errors | `docker compose exec ollama ollama pull llama3.2` and embedding model per `config.docker.yaml`. |
 | SQLite permission errors | `/data` volume; entrypoint `chown`s for user `boggers`. |
 | Agent queue / Redis errors in logs | Ensure `redis` is up in compose, or set `REDIS_URL` for local Redis; multi-agent falls back to memory if Redis is unavailable (see [`docs/WAVE13.md`](docs/WAVE13.md)). |

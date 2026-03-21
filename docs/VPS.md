@@ -2,6 +2,8 @@
 
 Stack: **Ollama**, **Redis** (Wave 13 multi-agent), **BoggersTheAI** (FastAPI), **Next.js**, optional **Caddy** (TLS). See root [`docker-compose.yml`](../docker-compose.yml).
 
+For **how visitors use the site** (Lab → `/api/boggers` → backend → Ollama), read **[How the website, Lab, and AI connect](../README.md#how-the-website-lab-and-ai-connect)** in the root README.
+
 ## One-command bootstrap (Ubuntu)
 
 From a fresh Ubuntu VPS (SSH as a sudo user):
@@ -91,7 +93,7 @@ WantedBy=multi-user.target
 Install:
 
 ```bash
-sudo install -m 644 ts-os.service /etc/systemd/system/ts-os.service
+sudo install -m 644 systemd/ts-os.service /etc/systemd/system/ts-os.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now ts-os.service
 ```

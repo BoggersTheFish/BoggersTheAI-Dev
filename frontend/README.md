@@ -13,9 +13,13 @@ Upstream lives at [boggersthefish.com](https://boggersthefish.com). In **[Bogger
 | **Lab** — live `/status`, `POST /query` | [`src/app/lab/page.tsx`](src/app/lab/page.tsx) |
 | **Wave 15 — WASM / TS-OS Mini** | [`src/app/wasm/page.tsx`](src/app/wasm/page.tsx), [`src/lib/wasmTsOs.ts`](src/lib/wasmTsOs.ts) |
 
+**How it behaves on the public site:** the browser only calls **same-origin** routes (`/api/boggers/status`, `/api/boggers/query`, …). The Next **server** forwards to FastAPI using **`BOGGERS_INTERNAL_URL`** and attaches **`BOGGERS_DASHBOARD_TOKEN`** — never exposed as `NEXT_PUBLIC_*`. Full diagrams, VPS setup, and production checklist: **[root README — How the website, Lab, and AI connect](../README.md#how-the-website-lab-and-ai-connect)**.
+
 **Environment (local):** copy [`.env.example`](.env.example) to `.env.local`. Set `BOGGERS_INTERNAL_URL=http://127.0.0.1:8000` and `BOGGERS_DASHBOARD_TOKEN` if the backend uses a token.
 
-**Docker:** compose sets `BOGGERS_INTERNAL_URL=http://backend:8000` — no token in the browser bundle.
+**Docker (all-in-one):** compose sets `BOGGERS_INTERNAL_URL=http://backend:8000` for the frontend service.
+
+**Split hosting (e.g. Vercel + API on a VPS):** set **`BOGGERS_INTERNAL_URL`** in the **frontend** environment to your API’s reachable base URL (HTTPS). The Python stack must still run with matching **`BOGGERS_DASHBOARD_TOKEN`** and appropriate **`BOGGERS_CORS_ORIGINS`** if anything calls FastAPI from the browser directly.
 
 ---
 
@@ -40,9 +44,9 @@ npm run build
 npm run start
 ```
 
-**BoggersTheAI-Dev production:** use the repo root `docker compose` (see [../README.md](../README.md)); the frontend image uses `output: standalone` in [`next.config.ts`](next.config.ts).
+**BoggersTheAI-Dev production (recommended):** repo root **`docker compose`** — see [../README.md](../README.md) (VPS bootstrap, Caddy TLS, verification). The frontend image uses `output: standalone` in [`next.config.ts`](next.config.ts).
 
-Vercel-only deploys do not include the Python backend unless you host API separately.
+**Vercel / static-only frontend:** the Python backend and Ollama are **not** included. Point **`BOGGERS_INTERNAL_URL`** at your hosted API, or run the full stack on a VPS.
 
 ## Site “waves” (UI milestones)
 
