@@ -100,6 +100,7 @@ flowchart TB
 | [`docker-compose.yml`](docker-compose.yml) | Services: `ollama`, `redis`, `backend`, `frontend`; optional `caddy` (`--profile tls`). |
 | [`Caddyfile`](Caddyfile) | TLS + reverse proxy to `frontend:3000` when using the TLS profile. |
 | [`scripts/deploy.sh`](scripts/deploy.sh) | Build, up, `ollama pull`, quick health curls. |
+| [`scripts/vps-bootstrap.sh`](scripts/vps-bootstrap.sh) | **Ubuntu VPS one-shot:** Docker install, clone `/opt`, `.env` + token, compose, models, verify. |
 | [`docs/README.md`](docs/README.md) | Index of runbooks and wave docs. |
 | [`docs/VPS.md`](docs/VPS.md) | Firewall, swap, backups, systemd. |
 | [`docs/WAVE13.md`](docs/WAVE13.md) | Wave 13 — sharding + multi-agent. |
@@ -136,6 +137,22 @@ Optional one-shot helper (Linux/macOS):
 ```bash
 bash scripts/deploy.sh
 ```
+
+### Ubuntu VPS — one command (fresh server)
+
+Installs Docker if needed, clones to `/opt/BoggersTheAI-Dev`, creates `.env` with a random **`BOGGERS_DASHBOARD_TOKEN`**, builds and starts the stack, pulls **Ollama** models from [`config.docker.yaml`](config.docker.yaml), and runs [`scripts/verify-stack.sh`](scripts/verify-stack.sh).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BoggersTheFish/BoggersTheAI-Dev/main/scripts/vps-bootstrap.sh | sudo bash
+```
+
+With your public hostname (sets CORS; optional HTTPS via Caddy):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BoggersTheFish/BoggersTheAI-Dev/main/scripts/vps-bootstrap.sh | sudo bash -s -- --domain your.domain.com --tls
+```
+
+After `--tls`, point DNS **A/AAAA** for `your.domain.com` to this VPS; open **80/443** in the firewall ([`docs/VPS.md`](docs/VPS.md)). The script `chown`s the repo to **`SUDO_USER`** when run via `sudo` so you can edit `.env` without root.
 
 **Verification** (after containers are healthy):
 

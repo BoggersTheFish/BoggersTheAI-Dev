@@ -2,6 +2,18 @@
 
 Stack: **Ollama**, **Redis** (Wave 13 multi-agent), **BoggersTheAI** (FastAPI), **Next.js**, optional **Caddy** (TLS). See root [`docker-compose.yml`](../docker-compose.yml).
 
+## One-command bootstrap (Ubuntu)
+
+From a fresh Ubuntu VPS (SSH as a sudo user):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BoggersTheFish/BoggersTheAI-Dev/main/scripts/vps-bootstrap.sh | sudo bash
+```
+
+Public hostname + TLS (Caddy): `sudo bash ... -- --domain boggersthefish.com --tls` (DNS must point here before Let’s Encrypt will succeed).
+
+The script installs **Docker** if missing, clones to **`/opt/BoggersTheAI-Dev`**, wires **`.env`** (shared dashboard token + CORS when `--domain` is set), runs **`docker compose up -d --build`**, pulls **llama3.2** and **nomic-embed-text**, and runs **`scripts/verify-stack.sh`**. Re-run the same command later to **git pull** and rebuild.
+
 ## Ports
 
 - **3000** — Next.js (primary UI; proxies `/api/boggers/*` to FastAPI with `BOGGERS_DASHBOARD_TOKEN` server-side).

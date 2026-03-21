@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 if [[ ! -d backend || ! -d frontend ]]; then
-  echo "Run from ts-os-public with backend/ and frontend/ cloned (see README)." >&2
+  echo "Run from BoggersTheAI-Dev repo root (backend/ and frontend/ present). See README." >&2
   exit 1
 fi
 
