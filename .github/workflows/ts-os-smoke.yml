@@ -69,7 +69,9 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
 
       - name: Install wasm-pack
-        run: curl https://rustwasm.wasm-pack.dev/installer/init.sh -sSf | sh
+        run: |
+          curl https://rustwasm.wasm-pack.dev/installer/init.sh -sSf | sh
+          echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> "$GITHUB_PATH"
 
       - name: wasm-pack build
         working-directory: wasm/ts-os-mini
