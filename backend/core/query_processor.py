@@ -126,20 +126,33 @@ class QueryProcessor:
             return self._process_query_inner(query)
 
     def _process_query_inner(self, query: str) -> QueryResponse:
-        topics = self._extract_topics(query)
-        context = self._retrieve_context(topics)
+        concepts = self._resolve_concepts(query)
+        topics = concepts
+        top_k = int(self.synthesis_config.get("top_k_nodes", 12))
+        context = self._retrieve_context_for_concepts(concepts, top_k)
         sufficiency = self._score_sufficiency(context)
-        used_research = False
-        used_tool = False
-        tool_name: str | None = None
-        consolidated_merges = 0
-        insight_path: str | None = None
-        hypotheses: List[dict] = []
-        confidence = 0.0
-        reasoning_trace = ""
+        explored = False
 
-        if sufficiency < self.min_sufficiency and self.adapters.ingest:
-            for topic in topics:
+        explore_on_miss = bool(self.synthesis_config.get("explore_on_miss", True))
+        explorer = getattr(self.graph, "explore_user_input", None)
+        if (
+            sufficiency < self.min_sufficiency
+            and explore_on_miss
+            and callable(explorer)
+        ):
+            cycles = int(self.synthesis_config.get("explore_wave_cycles", 2))
+            try:
+                explorer(query, concepts, wave_cycles=cycles)
+                explored = True
+            except Exception as exc:
+                logger.warning("Graph exploration failed: %s", exc)
+            context = self._retrieve_context_for_concepts(concepts, top_k)
+            sufficiency = self._score_sufficiency(context)
+
+        ingest_after = bool(self.synthesis_config.get("ingest_after_explore", False))
+        used_research = False
+        if sufficiency < self.min_sufficiency and self.adapters.ingest and ingest_after:
+            for topic in concepts:
                 ingested_nodes = self.adapters.ingest.ingest(topic)
                 for node in ingested_nodes:
                     self.graph.add_node(
@@ -150,18 +163,27 @@ class QueryProcessor:
                         stability=node.stability,
                         last_wave=node.last_wave,
                     )
-            context = self._retrieve_context(topics)
+            context = self._retrieve_context_for_concepts(concepts, top_k)
             sufficiency = self._score_sufficiency(context)
             used_research = True
 
-        tool_node = self._execute_tool_if_needed(query, topics, sufficiency)
+        used_tool = False
+        tool_name: str | None = None
+        consolidated_merges = 0
+        insight_path: str | None = None
+        hypotheses: List[dict] = []
+        confidence = 0.0
+        reasoning_trace = ""
+
+        tool_node = self._execute_tool_if_needed(query, concepts, sufficiency)
         if tool_node is not None:
             context = [tool_node, *context]
             used_tool = True
             tool_name = tool_node.topics[0] if tool_node.topics else None
 
+        pipeline_notes = self._build_pipeline_notes(concepts, explored, sufficiency)
         answer, hypotheses, confidence, reasoning_trace = self._synthesize(
-            query, context
+            query, context, pipeline_notes=pipeline_notes
         )
         min_confidence_for_log = float(
             self.self_improvement_config.get("min_confidence_for_log", 0.7)
@@ -261,6 +283,72 @@ class QueryProcessor:
         )
         return node
 
+    def _resolve_concepts(self, query: str) -> List[str]:
+        decompose = bool(self.synthesis_config.get("decompose_with_llm", True))
+        ollama_cfg = self.inference_config.get("ollama", {})
+        if (
+            decompose
+            and isinstance(ollama_cfg, dict)
+            and bool(ollama_cfg.get("enabled", False))
+            and self.local_llm is not None
+            and hasattr(self.local_llm, "decompose_query_to_concepts")
+        ):
+            try:
+                concepts = self.local_llm.decompose_query_to_concepts(query)
+                if concepts:
+                    return concepts
+            except Exception as exc:
+                logger.warning("LLM concept decomposition failed: %s", exc)
+        return self._extract_topics(query)
+
+    def _retrieve_context_for_concepts(
+        self, concepts: List[str], top_k: int
+    ) -> List[Node]:
+        finder = getattr(self.graph, "find_nodes_for_concepts", None)
+        if callable(finder):
+            found = finder(concepts, top_k=top_k)
+            if found:
+                return found
+        merged: dict[str, Node] = {}
+        use_subgraph = bool(self.synthesis_config.get("use_graph_subgraph", True))
+        if use_subgraph and concepts:
+            anchor = concepts[0][:64] if concepts[0] else "general"
+            for item in self.graph.get_activated_subgraph(
+                query_topic=anchor, top_k=top_k
+            ):
+                n = self._node_from_dict(item)
+                if n is not None:
+                    merged[n.id] = n
+        for c in concepts[:8]:
+            for node in self.graph.get_nodes_by_topic(c):
+                merged[node.id] = node
+        ranked = sorted(
+            merged.values(),
+            key=lambda n: (n.activation, n.stability, n.last_wave),
+            reverse=True,
+        )
+        return ranked[:top_k]
+
+    def _build_pipeline_notes(
+        self, concepts: List[str], explored: bool, sufficiency: float
+    ) -> str:
+        ctext = ", ".join(concepts[:12]) if concepts else "(none)"
+        if explored:
+            explore_line = (
+                "Graph exploration ran: user prompt was injected as a probe node "
+                "and connected into the graph; wave cycles propagated activation "
+                "before synthesis."
+            )
+        else:
+            explore_line = (
+                "Graph exploration skipped (enough retrieved context or disabled)."
+            )
+        return (
+            f"Decomposed concepts for retrieval: {ctext}\n"
+            f"{explore_line}\n"
+            f"Retrieval sufficiency score (internal): {sufficiency:.2f}"
+        )
+
     def _extract_topics(self, query: str) -> List[str]:
         tokens = re.findall(r"[A-Za-z0-9_]+", query.lower())
         stop = {
@@ -357,9 +445,13 @@ class QueryProcessor:
         return count_score + activation_score + recency_score
 
     def _synthesize(
-        self, query: str, context: List[Node]
+        self,
+        query: str,
+        context: List[Node],
+        pipeline_notes: str = "",
     ) -> tuple[str, List[dict], float, str]:
-        context_text = self._render_context_text(context)
+        context_text = self._render_context_text(context, pipeline_notes=pipeline_notes)
+        strict = bool(self.synthesis_config.get("strict_graph_pipeline", True))
         ollama_cfg = self.inference_config.get("ollama", {})
         if (
             isinstance(ollama_cfg, dict)
@@ -379,6 +471,11 @@ class QueryProcessor:
                     hypotheses = self._check_hypothesis_consistency(hypotheses, context)
                     confidence = float(llm_output.get("confidence", 0.0))
                     reasoning_trace = str(llm_output.get("reasoning_trace", "")).strip()
+                    base_trace = pipeline_notes.strip()
+                    if reasoning_trace:
+                        reasoning_trace = f"{base_trace}\n\n{reasoning_trace}".strip()
+                    else:
+                        reasoning_trace = base_trace
                     if answer:
                         return (
                             answer,
@@ -394,6 +491,14 @@ class QueryProcessor:
                     if attempt == max_retries - 1:
                         break
 
+        if strict:
+            return (
+                "LLM synthesis is unavailable. Ensure Ollama is running and the "
+                "configured chat model is pulled (e.g. ollama pull llama3.2).",
+                [],
+                0.0,
+                pipeline_notes or "llm_unavailable",
+            )
         if self.adapters.inference:
             answer = self.adapters.inference.synthesize(context_text, query)
             return (answer, [], 0.0, "inference_router_fallback")
@@ -498,10 +603,17 @@ class QueryProcessor:
         }
         trace_file.write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
-    def _render_context_text(self, context: List[Node]) -> str:
-        if not context:
-            return ""
+    def _render_context_text(
+        self, context: List[Node], pipeline_notes: str = ""
+    ) -> str:
         lines: List[str] = []
+        if pipeline_notes.strip():
+            lines.append("=== Retrieval / exploration ===")
+            lines.append(pipeline_notes.strip())
+            lines.append("")
+        if not context:
+            return "\n".join(lines)
+        lines.append("=== Graph nodes ===")
         for node in context:
             lines.append(
                 f"[node:{node.id}] topic={','.join(node.topics)} "

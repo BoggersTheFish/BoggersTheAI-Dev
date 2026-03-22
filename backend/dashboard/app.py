@@ -378,17 +378,26 @@ class QueryBody(BaseModel):
     query: str = Field(min_length=1, max_length=8000)
 
 
-@limiter.limit("30/minute", key_func=_session_or_ip_key)
+@limiter.limit("90/minute", key_func=_session_or_ip_key)
 @app.post("/query")
 def post_query(
     request: Request,
     body: QueryBody,
     _: None = Depends(_check_auth),
+    x_boggers_session_id: str | None = Header(
+        default=None, alias="X-Boggers-Session-ID"
+    ),
 ) -> dict[str, Any]:
-    """Programmatic query into the TS-OS pipeline (same as CLI `rt.ask`)."""
+    """Programmatic query into the TS-OS pipeline (same as CLI `rt.ask`).
+
+    Pass ``X-Boggers-Session-ID`` to isolate multi-turn chat history per browser tab.
+    """
     from BoggersTheAI.interface.api import handle_query
 
-    return handle_query({"query": body.query})
+    return handle_query(
+        {"query": body.query},
+        client_session_id=x_boggers_session_id,
+    )
 
 
 def _register_wave13() -> None:

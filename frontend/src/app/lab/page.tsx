@@ -13,8 +13,6 @@ import {
   Activity,
   Send,
   Github,
-  Cpu,
-  WifiOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -79,36 +77,19 @@ function CopyButton({ code }: { code: string }) {
   );
 }
 
-/**
- * Wave 15: PushNodeForm with WASM fallback.
- *
- * Primary path: POST /query → BoggersRuntime.ask() (full Python/LLM pipeline).
- * Fallback path: when the backend is offline, WasmQueryEngine answers locally
- * in the browser using the pre-seeded TS-OS concept graph + wave cycles.
- *
- * TS Logic: The WASM fallback runs real propagate/relax/tension cycles on a
- * 12-node knowledge graph. The answer comes from whichever node emerges with
- * the highest activation after 4 wave cycles. Same math, no server needed.
- */
+/** POST /query → decompose → graph search → optional probe + waves → LLM synthesis (no browser fallback). */
 function PushNodeForm() {
   const [value, setValue] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [wasmMode, setWasmMode] = useState(false);
   const [lastAnswer, setLastAnswer] = useState("");
-  const [lastSource, setLastSource] = useState("");
+  const [lastError, setLastError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!value.trim()) return;
     setLoading(true);
-
-    // If already in WASM mode, skip the backend attempt
-    if (wasmMode) {
-      await handleWasmQuery(value.trim());
-      setLoading(false);
-      return;
-    }
+    setLastError("");
 
     try {
       const r = await fetch(boggersUrl("/query"), {
@@ -118,7 +99,7 @@ function PushNodeForm() {
           ...getSessionHeaders(),
         },
         body: JSON.stringify({ query: value.trim() }),
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(120000),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -127,7 +108,6 @@ function PushNodeForm() {
       if ((data as { ok?: boolean }).ok) {
         const answer = String((data as { answer?: string }).answer ?? "");
         setLastAnswer(answer);
-        setLastSource("live");
         setSubmitted(true);
         toast({
           title: `↯ TS-OS response`,
@@ -137,68 +117,36 @@ function PushNodeForm() {
       } else {
         throw new Error((data as { error?: string }).error || "Query failed");
       }
-    } catch {
-      // Backend offline — switch to WASM mode automatically
-      setWasmMode(true);
-      await handleWasmQuery(value.trim());
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "Could not reach the backend. Start the stack (docker compose up) and ensure the API token matches.";
+      setLastError(msg);
+      toast({
+        title: "Query failed",
+        description: msg.slice(0, 200),
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleWasmQuery = async (text: string) => {
-    // Lazy-import so the engine only loads when actually needed
-    const { getWasmQueryEngine } = await import("@/lib/wasmQueryEngine");
-    const engine = getWasmQueryEngine();
-    const result = engine.query(text);
-    setLastAnswer(result.answer);
-    setLastSource(`wasm:${result.sourceNode}`);
-    setSubmitted(true);
-    toast({
-      title: "↯ WASM response (offline mode)",
-      description: result.answer.slice(0, 280),
-      variant: "wave",
-    });
   };
 
   return (
     <div className="ts-card p-5">
       <div className="flex items-center gap-2 mb-3">
         <Zap className="w-4 h-4 text-ts-purple" />
-        <h3 className="font-mono font-semibold text-sm text-ts-purple-light">Push a Node</h3>
-        <Badge variant="outline" className="text-[10px]">Vibe-code</Badge>
-        {wasmMode && (
-          <Badge
-            variant="outline"
-            className="text-[10px] border-orange-400/40 text-orange-400 flex items-center gap-1"
-          >
-            <Cpu className="w-2.5 h-2.5" />
-            WASM mode
-          </Badge>
-        )}
+        <h3 className="font-mono font-semibold text-sm text-ts-purple-light">Ask the graph</h3>
+        <Badge variant="outline" className="text-[10px]">LLM + graph</Badge>
       </div>
 
-      {/* Wave 15 offline banner */}
-      {wasmMode && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          className="mb-3 px-3 py-2 rounded-lg border border-orange-400/30 bg-orange-400/5 text-[11px] text-orange-300 flex items-start gap-2"
-        >
-          <WifiOff className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-          <span>
-            <strong>Backend offline</strong> — running in{" "}
-            <Link href="/wasm" className="underline">Wave 15 WASM mode</Link>.
-            {" "}Answers come from a 12-node browser graph (same wave math, no LLM).
-            {" "}Start Docker to restore full responses.
-          </span>
-        </motion.div>
+      {lastError && (
+        <p className="text-xs text-red-400/90 mb-3 font-mono">{lastError}</p>
       )}
 
       <p className="text-xs text-muted-foreground mb-4">
-        Type any concept, idea, or question. This simulates sending activation to the
-        TS graph — finding the lowest-stability node and pushing it. The OS converges
-        everything else.
+        Your prompt is decomposed into concepts, matched against the live graph, and
+        optionally explored via a probe node and wave cycles when context is thin; the
+        LLM then synthesizes an answer. Requires the Docker backend and Ollama.
       </p>
 
       {!submitted ? (
@@ -207,9 +155,7 @@ function PushNodeForm() {
             value={value}
             onChange={(e) => setValue(e.target.value)}
             placeholder={
-              wasmMode
-                ? "e.g. 'How does tension drive emergence?'\n'What is the wave engine?'\n'Explain distributed sharding'"
-                : "e.g. 'What if nodes could merge across sessions?'\n'Build a distributed version of UniversalLivingGraph'\n'Why does tension spike at node merges?'"
+              "e.g. 'What if nodes could merge across sessions?'\n'How does tension relate to emergence?'\n'Explain Redis-backed sharding'"
             }
             className={cn(
               "w-full h-28 px-3 py-2 rounded-lg text-sm font-mono",
@@ -223,12 +169,12 @@ function PushNodeForm() {
             {loading ? (
               <>
                 <Activity className="w-4 h-4 animate-pulse" />
-                {wasmMode ? "Running wave cycles…" : "Propagating…"}
+                Reasoning…
               </>
             ) : (
               <>
-                {wasmMode ? <Cpu className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-                {wasmMode ? "Run WASM Query" : "Push Activation"}
+                <Send className="w-4 h-4" />
+                Send
               </>
             )}
           </Button>
@@ -241,26 +187,18 @@ function PushNodeForm() {
         >
           <div className={cn(
             "inline-flex items-center justify-center w-12 h-12 rounded-full border-2 mb-3",
-            wasmMode
-              ? "border-orange-400 bg-orange-400/20"
-              : "border-ts-purple bg-ts-purple/20 shadow-ts"
+            "border-ts-purple bg-ts-purple/20 shadow-ts"
           )}>
-            {wasmMode ? (
-              <Cpu className="w-5 h-5 text-orange-400" />
-            ) : (
-              <Zap className="w-5 h-5 text-ts-purple-light" />
-            )}
+            <Zap className="w-5 h-5 text-ts-purple-light" />
           </div>
           <p className={cn(
             "font-mono text-sm font-semibold",
-            wasmMode ? "text-orange-300" : "text-ts-purple-light"
+            "text-ts-purple-light"
           )}>
-            {wasmMode ? "WASM wave propagated ↯" : "Wave propagated ↯"}
+            Response ready ↯
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            {wasmMode
-              ? `Answered by node "${lastSource.replace("wasm:", "")}" — browser graph, no server.`
-              : "Answer came from the live graph + synthesis path."}
+            Answer from the live graph pipeline (decompose → retrieve → explore if needed → LLM).
           </p>
           {lastAnswer && (
             <p className="text-xs text-muted-foreground/70 mt-2 text-left px-2 max-h-24 overflow-y-auto leading-relaxed">
@@ -271,7 +209,7 @@ function PushNodeForm() {
             variant="ghost"
             size="sm"
             className="mt-3 text-xs"
-            onClick={() => { setSubmitted(false); setValue(""); setLastAnswer(""); }}
+            onClick={() => { setSubmitted(false); setValue(""); setLastAnswer(""); setLastError(""); }}
           >
             Push another
           </Button>

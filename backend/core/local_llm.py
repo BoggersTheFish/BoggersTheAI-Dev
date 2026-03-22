@@ -32,8 +32,30 @@ class LocalLLM:
         if self.adapter_path:
             self.load_adapter(self.adapter_path, base_model=self.base_model)
 
+    def decompose_query_to_concepts(self, query: str) -> list[str]:
+        """LLM step 1: split user prompt into graph-searchable concept labels."""
+        prompt = (
+            "Break the user's message into 3-8 short concept labels for searching a knowledge graph.\n"
+            'Return ONLY valid JSON: {"concepts":["label one","label two",...]}\n'
+            "Rules: lowercase phrases, 1-4 words each, no duplicates, no explanation.\n\n"
+            f"User message:\n{query}\n"
+        )
+        content = self._run_generation(prompt)
+        parsed = self._parse_json(content)
+        raw = parsed.get("concepts", [])
+        if not isinstance(raw, list):
+            return []
+        out: list[str] = []
+        for item in raw[:12]:
+            s = str(item).strip().lower()
+            if s and s not in out:
+                out.append(s)
+        return out
+
     def summarize_and_hypothesize(self, context: str, query: str) -> dict:
         prompt = (
+            "You ground answers in the graph context below. The query was decomposed into "
+            "concepts for retrieval; cite themes that appear in the context nodes.\n"
             "Return strict JSON with keys: answer (string), confidence (float 0..1), "
             "reasoning_trace (string), hypotheses (array of 2-3 objects with keys: "
             "text (string), confidence (float 0..1)).\n\n"

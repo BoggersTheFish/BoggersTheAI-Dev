@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ArrowRight, Github, Zap, Play, ChevronDown } from "lucide-react";
+import { ArrowRight, Github, Zap, Play, ChevronDown, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TSForceGraph } from "@/components/graph/TSForceGraph";
 import { TS_PHILOSOPHY, SITE_META } from "@/lib/tsData";
@@ -120,6 +120,12 @@ export function HeroSection() {
             <Link href="/lab">
               <Play className="w-4 h-4" />
               Run the Live Demo
+            </Link>
+          </Button>
+          <Button size="lg" className="bg-ts-purple hover:bg-ts-purple/90" asChild>
+            <Link href="/chat">
+              <MessageSquare className="w-4 h-4" />
+              TS Chat
             </Link>
           </Button>
           <Button size="lg" variant="secondary" asChild>

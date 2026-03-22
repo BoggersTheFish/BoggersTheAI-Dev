@@ -27,14 +27,17 @@ def get_runtime() -> BoggersRuntime:
 
 
 def handle_query(
-    payload: Dict[str, Any], runtime: BoggersRuntime | None = None
+    payload: Dict[str, Any],
+    runtime: BoggersRuntime | None = None,
+    client_session_id: str | None = None,
 ) -> Dict[str, Any]:
     rt = runtime or get_runtime()
     query = str(payload.get("query", "")).strip()
     if not query:
         return {"ok": False, "error": "query is required"}
+    sid = (client_session_id or "").strip()[:128] or None
     try:
-        response = rt.ask(query)
+        response = rt.ask(query, client_session_id=sid)
     except Exception as exc:
         logger.error("Query failed: %s", exc)
         return {
@@ -42,7 +45,10 @@ def handle_query(
             "error": _friendly_http_error(str(exc)),
         }
     answer = clean_lab_response(response.answer)
-    return {"ok": True, "answer": answer}
+    out: Dict[str, Any] = {"ok": True, "answer": answer}
+    if sid:
+        out["session_id"] = sid
+    return out
 
 
 def _friendly_http_error(raw: str) -> str:

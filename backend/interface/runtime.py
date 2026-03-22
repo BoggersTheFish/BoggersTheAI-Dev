@@ -162,7 +162,8 @@ class BoggersRuntime(AutonomousLoopMixin, SelfImprovementMixin):
         self._autonomous_mode_index = 0
         self._tui_thread: threading.Thread | None = None
         self._tui_stop_event = threading.Event()
-        self._last_conversation_node_id: str | None = None
+        self._last_conversation_by_session: dict[str, str | None] = {}
+        self._request_tls = threading.local()
         self._llm_lock = threading.Lock()
         self.mode_manager = ModeManager()
         self.session_id = self._resolve_session_id()
@@ -282,18 +283,36 @@ class BoggersRuntime(AutonomousLoopMixin, SelfImprovementMixin):
         atexit.register(self.shutdown)
         self._register_health_checks()
 
-    def ask(self, query: str):
-        with self._state_lock:
-            self._last_query_time = time.time()
-        bus.emit("query", query=query)
-        metrics.increment("queries_total")
-        with metrics.timer("ask_duration"):
-            effective_query = self._apply_history_context(query)
-            response = self.query_router.process_text(effective_query)
-        response.query = query
-        self._save_conversation_turn(user_query=query, answer=response.answer)
-        bus.emit("query_complete", query=query, answer=response.answer)
-        return response
+    def _effective_session_id(self) -> str:
+        override = getattr(self._request_tls, "client_session", None)
+        if isinstance(override, str) and override.strip():
+            return override.strip()[:128]
+        return self.session_id
+
+    def ask(self, query: str, *, client_session_id: str | None = None):
+        prev = getattr(self._request_tls, "client_session", None)
+        if client_session_id and str(client_session_id).strip():
+            self._request_tls.client_session = str(client_session_id).strip()[:128]
+        try:
+            self._ensure_session_node()
+            with self._state_lock:
+                self._last_query_time = time.time()
+            bus.emit("query", query=query)
+            metrics.increment("queries_total")
+            with metrics.timer("ask_duration"):
+                effective_query = self._apply_history_context(query)
+                response = self.query_router.process_text(effective_query)
+            response.query = query
+            self._save_conversation_turn(user_query=query, answer=response.answer)
+            bus.emit("query_complete", query=query, answer=response.answer)
+            return response
+        finally:
+            if client_session_id and str(client_session_id).strip():
+                if prev is None:
+                    if hasattr(self._request_tls, "client_session"):
+                        delattr(self._request_tls, "client_session")
+                else:
+                    self._request_tls.client_session = prev
 
     def ask_audio(self, audio: bytes):
         with self._state_lock:
@@ -395,7 +414,9 @@ class BoggersRuntime(AutonomousLoopMixin, SelfImprovementMixin):
             self._tui_thread.join(timeout=2.0)
 
     def get_conversation_history(self, last_n: int = 8) -> list[dict]:
-        return self.graph.get_conversation_history(last_n=last_n)
+        return self.graph.get_conversation_history(
+            last_n=last_n, session_id=self._effective_session_id()
+        )
 
     def _ensure_self_improvement_node(self) -> None:
         node_id = "runtime:self_improvement"
@@ -427,23 +448,26 @@ class BoggersRuntime(AutonomousLoopMixin, SelfImprovementMixin):
         return generated
 
     def _ensure_session_node(self) -> None:
-        session_node_id = f"session:{self.session_id}"
+        sid = self._effective_session_id()
+        session_node_id = f"session:{sid}"
         if self.graph.get_node(session_node_id) is None:
             self.graph.add_node(
                 node_id=session_node_id,
-                content=f"Session {self.session_id}",
+                content=f"Session {sid}",
                 topics=["conversation", "session"],
                 activation=0.1,
                 stability=0.8,
                 base_strength=0.7,
-                attributes={"session_id": self.session_id, "type": "session_meta"},
+                attributes={"session_id": sid, "type": "session_meta"},
             )
             self.graph.save()
 
     def _apply_history_context(self, query: str) -> str:
         if not bool(self.config.get("os_loop", {}).get("multi_turn_enabled", True)):
             return query
-        history_context = self.graph.get_conversation_history(last_n=8)
+        history_context = self.graph.get_conversation_history(
+            last_n=8, session_id=self._effective_session_id()
+        )
         if not history_context:
             return query
         history_lines = []
@@ -461,8 +485,9 @@ class BoggersRuntime(AutonomousLoopMixin, SelfImprovementMixin):
         )
 
     def _save_conversation_turn(self, user_query: str, answer: str) -> None:
+        sid = self._effective_session_id()
         timestamp = datetime.now(timezone.utc).isoformat()
-        node_id = f"conversation:{self.session_id}:{int(time.time() * 1000)}"
+        node_id = f"conversation:{sid}:{int(time.time() * 1000)}"
         content = f"User: {user_query}\nAssistant: {answer}"
         node = self.graph.add_node(
             node_id=node_id,
@@ -473,21 +498,18 @@ class BoggersRuntime(AutonomousLoopMixin, SelfImprovementMixin):
             base_strength=0.65,
             attributes={
                 "timestamp": timestamp,
-                "session_id": self.session_id,
+                "session_id": sid,
                 "type": "conversation_turn",
             },
         )
-        session_node_id = f"session:{self.session_id}"
+        session_node_id = f"session:{sid}"
         if self.graph.get_node(session_node_id) is not None:
             self.graph.add_edge(session_node_id, node.id, weight=0.2)
         with self._state_lock:
-            if self._last_conversation_node_id and self.graph.get_node(
-                self._last_conversation_node_id
-            ):
-                self.graph.add_edge(
-                    self._last_conversation_node_id, node.id, weight=0.3
-                )
-            self._last_conversation_node_id = node.id
+            prev = self._last_conversation_by_session.get(sid)
+            if prev and self.graph.get_node(prev):
+                self.graph.add_edge(prev, node.id, weight=0.3)
+            self._last_conversation_by_session[sid] = node.id
         self.graph.save()
 
     def _apply_temperament(self) -> None:

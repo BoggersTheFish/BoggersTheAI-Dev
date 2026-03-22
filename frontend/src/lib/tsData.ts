@@ -212,6 +212,7 @@ export const SOCIAL_LINKS = [
 
 export const NAV_LINKS = [
   { href: "/", label: "Home", section: "home" },
+  { href: "/chat", label: "Chat", section: "chat" },
   { href: "/about", label: "About", section: "about" },
   { href: "/ts-os", label: "TS-OS", section: "ts-os" },
   { href: "/projects", label: "Projects", section: "projects" },

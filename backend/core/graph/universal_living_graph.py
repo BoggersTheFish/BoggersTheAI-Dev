@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import heapq
 import json
 import logging
@@ -353,13 +354,128 @@ class UniversalLivingGraph:
 
         return [asdict(node) for node in candidates[:top_k]]
 
-    def get_conversation_history(self, last_n: int = 8) -> list[dict]:
+    def find_nodes_for_concepts(self, concepts: list[str], top_k: int = 12) -> list[Node]:
+        """Score nodes by topic / text overlap and optional embedding similarity."""
+        if not concepts:
+            return []
+        scored: dict[str, tuple[Node, float]] = {}
+        for raw in concepts:
+            c = raw.strip().lower()
+            if len(c) < 2:
+                continue
+            for node in self.get_nodes_by_topic(c):
+                if not node.collapsed:
+                    prev = scored.get(node.id, (node, 0.0))[1]
+                    scored[node.id] = (node, prev + 0.55)
+            for node in self.nodes.values():
+                if node.collapsed:
+                    continue
+                tl = [t.lower() for t in node.topics]
+                if any(c == t or c in t or t in c for t in tl):
+                    prev = scored.get(node.id, (node, 0.0))[1]
+                    scored[node.id] = (node, prev + 0.4)
+                blob = node.content.lower()
+                if len(c) > 2 and c in blob:
+                    prev = scored.get(node.id, (node, 0.0))[1]
+                    scored[node.id] = (node, prev + 0.45)
+        if self._embedder is not None and hasattr(self._embedder, "embed"):
+            from ..embeddings import cosine_similarity
+
+            for raw in concepts[:8]:
+                c = raw.strip()
+                if len(c) < 2:
+                    continue
+                try:
+                    qv = self._embedder.embed(c)
+                except Exception:
+                    qv = []
+                if not qv:
+                    continue
+                for node in self.nodes.values():
+                    if node.collapsed or not node.embedding:
+                        continue
+                    sim = cosine_similarity(qv, node.embedding)
+                    if sim > 0.22:
+                        prev = scored.get(node.id, (node, 0.0))[1]
+                        scored[node.id] = (node, prev + float(sim) * 0.85)
+        ranked = sorted(scored.values(), key=lambda x: x[1], reverse=True)
+        return [n for n, _ in ranked[:top_k]]
+
+    def explore_user_input(
+        self,
+        query: str,
+        concepts: list[str],
+        wave_cycles: int = 2,
+    ) -> Node:
+        """Inject the user prompt as a high-activation probe, link into the graph, run waves."""
+        digest = hashlib.sha256(query.encode("utf-8")).hexdigest()[:14]
+        node_id = f"user_probe:{digest}"
+        topics = [c.strip() for c in concepts if c.strip()][:12] or ["user_input"]
+        existing = self.get_node(node_id)
+        is_new = existing is None
+        if existing is not None:
+            self.update_activation(node_id, 0.25)
+        else:
+            self.add_node(
+                node_id=node_id,
+                content=query,
+                topics=topics,
+                activation=0.9,
+                stability=0.42,
+                base_strength=0.58,
+                attributes={"type": "user_probe", "explore": True},
+            )
+        if is_new:
+            active = [
+                n
+                for n in self.nodes.values()
+                if not n.collapsed and n.id != node_id
+            ]
+            top_neighbors = heapq.nlargest(
+                3,
+                active,
+                key=lambda n: n.activation * n.base_strength + n.stability * 0.1,
+            )
+            for n in top_neighbors:
+                try:
+                    if n.id not in self._adjacency.get(node_id, {}):
+                        self.add_edge(
+                            node_id, n.id, weight=0.38, relation="explore"
+                        )
+                    if node_id not in self._adjacency.get(n.id, {}):
+                        self.add_edge(
+                            n.id, node_id, weight=0.18, relation="context"
+                        )
+                except KeyError:
+                    continue
+        probe = self.get_node(node_id)
+        if probe is None:
+            raise RuntimeError("explore_user_input failed to materialize probe node")
+        cycles = max(1, min(int(wave_cycles), 6))
+        for _ in range(cycles):
+            self.run_wave_cycle()
+        try:
+            self.save()
+        except Exception:
+            logger.debug("save after explore_user_input failed", exc_info=True)
+        return probe
+
+    def get_conversation_history(
+        self, last_n: int = 8, session_id: str | None = None
+    ) -> list[dict]:
         conversation_nodes = [
             node
             for node in self.nodes.values()
             if not node.collapsed
             and "conversation" in [topic.lower() for topic in node.topics]
         ]
+        if session_id:
+            sid = str(session_id).strip()
+            conversation_nodes = [
+                n
+                for n in conversation_nodes
+                if str(n.attributes.get("session_id", "")) == sid
+            ]
         ranked = sorted(
             conversation_nodes,
             key=lambda node: (

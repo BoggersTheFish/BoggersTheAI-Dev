@@ -49,8 +49,13 @@ inference:
         - "unsloth/gemma-2-2b-it"
   synthesis:
     use_graph_subgraph: true
-    top_k_nodes: 5
+    top_k_nodes: 12
     max_retries: 2
+    decompose_with_llm: true
+    explore_on_miss: true
+    explore_wave_cycles: 2
+    ingest_after_explore: false
+    strict_graph_pipeline: true
 
 adapters:
   enabled:
