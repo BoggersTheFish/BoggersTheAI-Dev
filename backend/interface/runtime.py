@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import atexit
+import json
 import logging
+import re
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from typing import Any, Dict, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,6 +24,7 @@ from ..core import (
     ModeManager,
     QueryAdapters,
     QueryProcessor,
+    QueryResponse,
     QueryRouter,
     RegistryIngestAdapter,
     RouterConfig,
@@ -138,11 +142,16 @@ class RuntimeConfig:
 
 
 class BoggersRuntime(AutonomousLoopMixin, SelfImprovementMixin):
-    def __init__(self, config: RuntimeConfig | None = None) -> None:
+    def __init__(
+        self, config: RuntimeConfig | None = None, *, tenant_id: str | None = None
+    ) -> None:
+        self.tenant_id = tenant_id
         self.config = config or RuntimeConfig()
         from ..core.config_loader import load_and_apply
 
         self.raw_config = load_and_apply(self.config)
+        if tenant_id:
+            self._apply_tenant_isolation_paths(tenant_id)
 
         self._apply_temperament()
 
@@ -163,6 +172,7 @@ class BoggersRuntime(AutonomousLoopMixin, SelfImprovementMixin):
         self._tui_thread: threading.Thread | None = None
         self._tui_stop_event = threading.Event()
         self._last_conversation_by_session: dict[str, str | None] = {}
+        self._last_highlight_by_session: dict[str, list[str]] = {}
         self._request_tls = threading.local()
         self._llm_lock = threading.Lock()
         self.mode_manager = ModeManager()
@@ -283,11 +293,88 @@ class BoggersRuntime(AutonomousLoopMixin, SelfImprovementMixin):
         atexit.register(self.shutdown)
         self._register_health_checks()
 
+    def _apply_tenant_isolation_paths(self, tenant_id: str) -> None:
+        """Hard TS isolation: separate persisted graph + vault per tenant (no shared substrate)."""
+        safe = re.sub(r"[^a-zA-Z0-9._-]", "", str(tenant_id).strip())[:64] or "default"
+        gdir = Path("graphs") / "tenants" / safe
+        gdir.mkdir(parents=True, exist_ok=True)
+        self.config.graph_path = str(gdir / "graph.json")
+        vdir = Path("vaults") / "tenants" / safe
+        vdir.mkdir(parents=True, exist_ok=True)
+        self.config.insight_vault_path = str(vdir)
+        logger.info(
+            "Tenant substrate: tenant=%s graph=%s vault=%s",
+            safe,
+            self.config.graph_path,
+            self.config.insight_vault_path,
+        )
+
     def _effective_session_id(self) -> str:
         override = getattr(self._request_tls, "client_session", None)
         if isinstance(override, str) and override.strip():
             return override.strip()[:128]
         return self.session_id
+
+    def _record_last_query_highlight(self, response: QueryResponse) -> None:
+        sid = self._effective_session_id()
+        if not sid:
+            return
+        path = list(response.path_node_ids or [])
+        if not path:
+            path = list(response.context_nodes or [])
+        ids = path[:128]
+        with self._state_lock:
+            self._last_highlight_by_session[sid] = ids
+        self._persist_last_query_path_on_session_node(sid, ids)
+
+    def _persist_last_query_path_on_session_node(
+        self, sid: str, ids: list[str]
+    ) -> None:
+        """Shared graph substrate for highlight path (multi-worker friendly)."""
+        session_node_id = f"session:{sid}"
+        node = self.graph.get_node(session_node_id)
+        if node is None:
+            return
+        merged = dict(node.attributes or {})
+        merged["last_query_path"] = json.dumps(ids[:128])
+        merged["last_query_path_ts"] = datetime.now(timezone.utc).isoformat()
+        self.graph.add_node(
+            node_id=session_node_id,
+            content=node.content,
+            topics=node.topics,
+            activation=node.activation,
+            stability=node.stability,
+            base_strength=node.base_strength,
+            last_wave=node.last_wave,
+            attributes=merged,
+            embedding=node.embedding,
+        )
+        try:
+            self.graph.save()
+        except Exception:
+            logger.debug("persist last_query_path failed", exc_info=True)
+
+    def get_last_query_highlight(self, session_id: str | None) -> list[str]:
+        if not session_id or not str(session_id).strip():
+            return []
+        key = str(session_id).strip()[:128]
+        with self._state_lock:
+            mem = list(self._last_highlight_by_session.get(key, []))
+        if mem:
+            return mem
+        node = self.graph.get_node(f"session:{key}")
+        if node is None:
+            return []
+        raw = (node.attributes or {}).get("last_query_path")
+        if not raw or not isinstance(raw, str):
+            return []
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return [str(x) for x in parsed if x][:128]
+        except json.JSONDecodeError:
+            return []
+        return []
 
     def ask(self, query: str, *, client_session_id: str | None = None):
         prev = getattr(self._request_tls, "client_session", None)
@@ -298,14 +385,56 @@ class BoggersRuntime(AutonomousLoopMixin, SelfImprovementMixin):
             with self._state_lock:
                 self._last_query_time = time.time()
             bus.emit("query", query=query)
-            metrics.increment("queries_total")
             with metrics.timer("ask_duration"):
                 effective_query = self._apply_history_context(query)
-                response = self.query_router.process_text(effective_query)
+                response = self.query_router.process_text(
+                    effective_query,
+                    client_session_id=self._effective_session_id(),
+                )
             response.query = query
+            self._record_last_query_highlight(response)
             self._save_conversation_turn(user_query=query, answer=response.answer)
             bus.emit("query_complete", query=query, answer=response.answer)
             return response
+        finally:
+            if client_session_id and str(client_session_id).strip():
+                if prev is None:
+                    if hasattr(self._request_tls, "client_session"):
+                        delattr(self._request_tls, "client_session")
+                else:
+                    self._request_tls.client_session = prev
+
+    def stream_ask(
+        self, query: str, *, client_session_id: str | None = None
+    ) -> Iterator[Dict[str, Any]]:
+        """TS pipeline: full graph phases first, then token stream (language surface)."""
+        prev = getattr(self._request_tls, "client_session", None)
+        if client_session_id and str(client_session_id).strip():
+            self._request_tls.client_session = str(client_session_id).strip()[:128]
+        try:
+            self._ensure_session_node()
+            with self._state_lock:
+                self._last_query_time = time.time()
+            bus.emit("query", query=query)
+            with metrics.timer("ask_duration"):
+                effective_query = self._apply_history_context(query)
+                full_response: QueryResponse | None = None
+                for ev in self.query_router.process_text_stream(
+                    effective_query,
+                    client_session_id=self._effective_session_id(),
+                ):
+                    if isinstance(ev, dict) and ev.get("type") == "done":
+                        r = ev.get("response")
+                        if isinstance(r, QueryResponse):
+                            full_response = r
+                    yield ev
+            if full_response is not None:
+                full_response.query = query
+                self._record_last_query_highlight(full_response)
+                self._save_conversation_turn(
+                    user_query=query, answer=full_response.answer
+                )
+                bus.emit("query_complete", query=query, answer=full_response.answer)
         finally:
             if client_session_id and str(client_session_id).strip():
                 if prev is None:

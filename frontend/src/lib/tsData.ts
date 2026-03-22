@@ -3,6 +3,31 @@
  * This is the single source of truth for all copy on the site.
  */
 
+/** Browser-facing copy for how TS-OS orders work: substrate → surface → optional grounding. */
+export const TS_SITE_PIPELINE = [
+  {
+    phase: "01",
+    name: "Substrate",
+    role: "Graph & session",
+    detail:
+      "Decomposition, activated subgraph, exploration, sufficiency — the living graph finishes before any token is emitted.",
+  },
+  {
+    phase: "02",
+    name: "Surface",
+    role: "Language stream",
+    detail:
+      "Tokens are pressure release on fixed context. Streaming keeps the UI responsive while retrieval and waves are already settled.",
+  },
+  {
+    phase: "03",
+    name: "Grounding",
+    role: "Score, don't rewrite",
+    detail:
+      "A JSON pass aligns confidence, hypotheses, and reasoning trace with batch synthesis. The answer text stays the streamed substrate.",
+  },
+] as const;
+
 export const TS_PHILOSOPHY = {
   headline: "TS — Thinking System / Thinking Wave",
   subheadline:

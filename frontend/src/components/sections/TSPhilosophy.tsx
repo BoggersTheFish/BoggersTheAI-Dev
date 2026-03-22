@@ -36,16 +36,16 @@ export function TSPhilosophy() {
           variants={FADE_UP}
           className="text-center mb-16"
         >
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-ts-purple/30 bg-ts-purple/5 text-xs font-mono text-ts-purple mb-4">
+          <div className="ts-phase-pill mb-5 justify-center">
             <span className="w-1.5 h-1.5 rounded-full bg-ts-purple" />
-            Core Philosophy
+            Core philosophy
           </div>
           <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">
-            The Operating Logic of Reality
+            The operating logic of reality
           </h2>
-          <p className="text-muted-foreground max-w-xl mx-auto">
-            Not a framework you use — a framework that describes everything that
-            already exists, including itself.
+          <p className="text-muted-foreground max-w-xl mx-auto text-sm sm:text-base">
+            Not a framework you install — a description that already includes itself. Same split as
+            the runtime: stable substrate, emergent surface.
           </p>
         </motion.div>
 

@@ -18,7 +18,15 @@ async function proxy(
   url.search = request.nextUrl.searchParams.toString();
 
   const headers = new Headers();
-  const pass = ["content-type", "accept", "accept-language", "x-boggers-session-id"];
+  const pass = [
+    "content-type",
+    "accept",
+    "accept-language",
+    "x-boggers-session-id",
+    "x-boggers-tenant-id",
+    "x-tenant-id",
+    "cache-control",
+  ];
   for (const name of pass) {
     const v = request.headers.get(name);
     if (v) headers.set(name, v);

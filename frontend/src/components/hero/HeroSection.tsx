@@ -2,18 +2,26 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ArrowRight, Github, Zap, Play, ChevronDown, MessageSquare } from "lucide-react";
+import {
+  ArrowRight,
+  Github,
+  Zap,
+  Play,
+  ChevronDown,
+  MessageSquare,
+  Layers,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TSForceGraph } from "@/components/graph/TSForceGraph";
-import { TS_PHILOSOPHY, SITE_META } from "@/lib/tsData";
+import { TS_PHILOSOPHY, SITE_META, TS_SITE_PIPELINE } from "@/lib/tsData";
 import { useWaveStore } from "@/store/waveStore";
 
 const FADE_UP = {
-  hidden: { opacity: 0, y: 24 },
+  hidden: { opacity: 0, y: 22 },
   show: (i: number) => ({
     opacity: 1,
     y: 0,
-    transition: { delay: i * 0.12, duration: 0.6, ease: [0.22, 1, 0.36, 1] },
+    transition: { delay: i * 0.1, duration: 0.55, ease: [0.22, 1, 0.36, 1] },
   }),
 };
 
@@ -28,17 +36,16 @@ export function HeroSection() {
     tension > 0.7 ? "text-red-400" : tension > 0.4 ? "text-yellow-400" : "text-green-400";
 
   return (
-    <section id="home" className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden">
-      {/* Grid background */}
+    <section
+      id="home"
+      className="relative min-h-[100dvh] flex flex-col justify-center overflow-hidden"
+    >
       <div
         className="absolute inset-0 ts-grid-bg animate-grid-pulse pointer-events-none"
         style={{ backgroundSize: "50px 50px" }}
       />
+      <div className="absolute inset-0 bg-gradient-radial from-ts-purple/10 via-ts-purple/[0.02] to-transparent pointer-events-none" />
 
-      {/* Deep radial glow from center */}
-      <div className="absolute inset-0 bg-gradient-radial from-ts-purple/8 via-ts-purple/2 to-transparent pointer-events-none" />
-
-      {/* Interactive force graph — full screen background */}
       <TSForceGraph
         className="absolute inset-0 w-full h-full"
         interactive
@@ -46,154 +53,177 @@ export function HeroSection() {
         particleSpeed={0.004}
       />
 
-      {/* Vignette edges to fade graph into black */}
-      <div className="absolute inset-0 pointer-events-none"
+      <div
+        className="absolute inset-0 pointer-events-none"
         style={{
-          background: "radial-gradient(ellipse 80% 80% at 50% 50%, transparent 40%, rgba(0,0,0,0.6) 100%)",
+          background:
+            "radial-gradient(ellipse 75% 70% at 50% 45%, transparent 38%, rgba(0,0,0,0.72) 100%)",
         }}
       />
+      <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-black to-transparent pointer-events-none" />
 
-      {/* Bottom fade */}
-      <div className="absolute bottom-0 left-0 right-0 h-48 bg-gradient-to-t from-black to-transparent pointer-events-none" />
-
-      {/* Hero content — layered above graph */}
-      <div className="relative z-10 text-center max-w-4xl mx-auto px-4 py-32 pointer-events-none">
-        {/* Wave badge */}
-        <motion.div
-          custom={0}
-          initial="hidden"
-          animate="show"
-          variants={FADE_UP}
-          className="flex items-center justify-center gap-2 mb-8 pointer-events-auto"
-        >
-          <div className="flex items-center gap-2 px-4 py-1.5 rounded-full border border-ts-purple/50 bg-black/70 backdrop-blur-sm text-xs font-mono text-ts-purple-light">
-            <span className="w-1.5 h-1.5 rounded-full bg-ts-purple animate-ping-slow" />
-            Wave 12 — Pages Island LIVE
-            <span className="text-ts-purple/40">|</span>
-            <span className="text-muted-foreground">Click any node to activate</span>
-          </div>
-        </motion.div>
-
-        {/* Main headline */}
-        <motion.h1
-          custom={1}
-          initial="hidden"
-          animate="show"
-          variants={FADE_UP}
-          className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-bold tracking-tight mb-4 leading-none"
-        >
-          <span className="ts-gradient-text-animated block drop-shadow-[0_0_30px_rgba(160,32,240,0.5)]">
-            Thinking System
-          </span>
-          <span className="text-white/80 text-2xl sm:text-3xl md:text-4xl font-light tracking-widest block mt-3 uppercase">
-            / Thinking Wave
-          </span>
-        </motion.h1>
-
-        {/* Subheadline */}
-        <motion.p
-          custom={2}
-          initial="hidden"
-          animate="show"
-          variants={FADE_UP}
-          className="text-base sm:text-lg text-muted-foreground max-w-2xl mx-auto mb-10 leading-relaxed"
-          style={{ textShadow: "0 2px 10px rgba(0,0,0,0.9)" }}
-        >
-          {TS_PHILOSOPHY.subheadline}
-        </motion.p>
-
-        {/* CTA Buttons */}
-        <motion.div
-          custom={3}
-          initial="hidden"
-          animate="show"
-          variants={FADE_UP}
-          className="flex flex-wrap items-center justify-center gap-3 mb-12 pointer-events-auto"
-        >
-          <Button size="lg" asChild>
-            <a href="#philosophy">
-              <Zap className="w-4 h-4" />
-              Enter the Graph
-            </a>
-          </Button>
-          <Button size="lg" variant="outline" asChild>
-            <Link href="/lab">
-              <Play className="w-4 h-4" />
-              Run the Live Demo
-            </Link>
-          </Button>
-          <Button size="lg" className="bg-ts-purple hover:bg-ts-purple/90" asChild>
-            <Link href="/chat">
-              <MessageSquare className="w-4 h-4" />
-              TS Chat
-            </Link>
-          </Button>
-          <Button size="lg" variant="secondary" asChild>
-            <Link
-              href="https://github.com/BoggersTheFish"
-              target="_blank"
-              rel="noopener noreferrer"
+      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-28 lg:py-32">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-10 items-center">
+          {/* Copy — language surface */}
+          <div className="lg:col-span-7 text-center lg:text-left pointer-events-none">
+            <motion.div
+              custom={0}
+              initial="hidden"
+              animate="show"
+              variants={FADE_UP}
+              className="flex justify-center lg:justify-start pointer-events-auto mb-8"
             >
-              <Github className="w-4 h-4" />
-              GitHub
-            </Link>
-          </Button>
-          <Button size="lg" variant="ghost" asChild>
-            <Link href="mailto:boggersthefish@boggersthefish.com">
-              <ArrowRight className="w-4 h-4" />
-              Vibe-Code Me
-            </Link>
-          </Button>
-        </motion.div>
+              <div className="ts-phase-pill">
+                <Layers className="w-3 h-3 text-ts-purple" />
+                Wave {SITE_META.currentWave} — {SITE_META.waveName}
+                <span className="text-ts-purple/35">|</span>
+                <span className="text-muted-foreground normal-case tracking-normal">
+                  substrate → surface
+                </span>
+              </div>
+            </motion.div>
 
-        {/* Live wave stats */}
-        <motion.div
-          custom={4}
-          initial="hidden"
-          animate="show"
-          variants={FADE_UP}
-          className="inline-flex flex-wrap items-center justify-center gap-4 text-xs font-mono text-muted-foreground bg-black/60 backdrop-blur-sm border border-ts-purple/20 rounded-full px-6 py-2.5"
-        >
-          <div className="flex items-center gap-1.5">
-            <span className="text-ts-purple/50">cycle</span>
-            <span className="text-ts-purple-light font-semibold">#{cycle}</span>
+            <motion.h1
+              custom={1}
+              initial="hidden"
+              animate="show"
+              variants={FADE_UP}
+              className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-4 leading-[1.05]"
+            >
+              <span className="ts-gradient-text-animated block drop-shadow-[0_0_28px_rgba(160,32,240,0.45)]">
+                Thinking System
+              </span>
+              <span className="text-white/85 text-xl sm:text-2xl md:text-3xl font-light tracking-[0.35em] block mt-4 uppercase">
+                / Thinking Wave
+              </span>
+            </motion.h1>
+
+            <motion.p
+              custom={2}
+              initial="hidden"
+              animate="show"
+              variants={FADE_UP}
+              className="text-base sm:text-lg text-muted-foreground max-w-xl mx-auto lg:mx-0 mb-10 leading-relaxed"
+              style={{ textShadow: "0 2px 12px rgba(0,0,0,0.85)" }}
+            >
+              {TS_PHILOSOPHY.subheadline}
+            </motion.p>
+
+            <motion.div
+              custom={3}
+              initial="hidden"
+              animate="show"
+              variants={FADE_UP}
+              className="flex flex-col sm:flex-row flex-wrap items-center justify-center lg:justify-start gap-3 pointer-events-auto"
+            >
+              <Button size="lg" className="w-full sm:w-auto gap-2" asChild>
+                <a href="#pipeline">
+                  <Zap className="w-4 h-4" />
+                  See the pipeline
+                </a>
+              </Button>
+              <Button size="lg" variant="outline" className="w-full sm:w-auto gap-2" asChild>
+                <Link href="/chat">
+                  <MessageSquare className="w-4 h-4" />
+                  TS Chat
+                </Link>
+              </Button>
+              <Button size="lg" variant="secondary" className="w-full sm:w-auto gap-2" asChild>
+                <Link href="/lab">
+                  <Play className="w-4 h-4" />
+                  Lab
+                </Link>
+              </Button>
+              <Button size="lg" variant="ghost" className="w-full sm:w-auto gap-2" asChild>
+                <Link
+                  href="https://github.com/BoggersTheFish"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Github className="w-4 h-4" />
+                  GitHub
+                </Link>
+              </Button>
+            </motion.div>
           </div>
-          <div className="w-px h-3 bg-ts-purple/20" />
-          <div className="flex items-center gap-1.5">
-            <span className="text-ts-purple/50">tension</span>
-            <span className={tensionColor}>{(tension * 100).toFixed(1)}%</span>
-          </div>
-          <div className="w-px h-3 bg-ts-purple/20" />
-          <div className="flex items-center gap-1.5">
-            <span className="text-ts-purple/50">active</span>
-            <span className="text-ts-purple-light">{activeNode?.label ?? "—"}</span>
-          </div>
-          <div className="w-px h-3 bg-ts-purple/20" />
-          <div className="flex items-center gap-1.5">
-            <span className="text-ts-purple/50">nodes</span>
-            <span className="text-ts-purple-light">{Object.keys(nodes).length}</span>
-          </div>
-          <div className="w-px h-3 bg-ts-purple/20" />
-          <div className="flex items-center gap-1.5">
-            <span className="text-ts-purple/50">wave</span>
-            <span className="text-ts-purple-light">#{SITE_META.currentWave}</span>
-          </div>
-          <div className="w-px h-3 bg-ts-purple/20" />
-          <div className="flex items-center gap-1.5">
-            <span className="text-ts-purple/50">tests</span>
-            <span className="text-green-400">200+ ✓</span>
-          </div>
-        </motion.div>
+
+          {/* Status stack — fixed substrate snapshot */}
+          <motion.div
+            custom={4}
+            initial="hidden"
+            animate="show"
+            variants={FADE_UP}
+            className="lg:col-span-5 pointer-events-auto"
+          >
+            <div className="ts-surface-panel p-6 sm:p-7 space-y-6 text-left">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] font-mono uppercase tracking-[0.25em] text-ts-purple/80">
+                  Live substrate
+                </span>
+                <span className="text-[10px] font-mono text-muted-foreground">
+                  #{cycle}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-xl border border-ts-purple/20 bg-black/40 px-3 py-2.5">
+                  <div className="text-[10px] font-mono text-ts-purple/50 mb-1">tension</div>
+                  <div className={`text-sm font-mono font-semibold ${tensionColor}`}>
+                    {(tension * 100).toFixed(1)}%
+                  </div>
+                </div>
+                <div className="rounded-xl border border-ts-purple/20 bg-black/40 px-3 py-2.5">
+                  <div className="text-[10px] font-mono text-ts-purple/50 mb-1">active node</div>
+                  <div className="text-sm font-mono text-ts-purple-light truncate">
+                    {activeNode?.label ?? "—"}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-ts-purple/20 bg-black/40 px-3 py-2.5 col-span-2">
+                  <div className="text-[10px] font-mono text-ts-purple/50 mb-1">graph nodes</div>
+                  <div className="text-sm font-mono text-white">
+                    {Object.keys(nodes).length} in simulation
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-widest text-ts-purple/70 mb-3">
+                  Query path (same order as TS-OS)
+                </div>
+                <ul className="space-y-2">
+                  {TS_SITE_PIPELINE.map((s) => (
+                    <li
+                      key={s.phase}
+                      className="flex gap-3 text-xs text-muted-foreground leading-snug"
+                    >
+                      <span className="font-mono text-ts-purple/50 shrink-0 w-6">{s.phase}</span>
+                      <span>
+                        <span className="text-ts-purple-light/95 font-medium">{s.name}</span>
+                        <span className="text-muted-foreground"> — {s.role}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <Button variant="outline" size="sm" className="w-full font-mono text-xs" asChild>
+                <Link href="/ts-os">
+                  Architecture reference
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </Button>
+            </div>
+          </motion.div>
+        </div>
       </div>
 
-      {/* Scroll indicator */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ delay: 1.8 }}
-        className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 text-muted-foreground/50 text-xs font-mono animate-bounce-gentle"
+        transition={{ delay: 1.6 }}
+        className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 text-muted-foreground/50 text-xs font-mono animate-bounce-gentle pointer-events-none"
       >
-        <span>scroll to propagate</span>
+        <span>scroll</span>
         <ChevronDown className="w-4 h-4" />
       </motion.div>
     </section>

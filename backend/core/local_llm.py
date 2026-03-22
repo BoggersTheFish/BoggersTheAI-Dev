@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List
+import threading
+from typing import Any, Dict, Iterator, List
 
 import ollama
 
@@ -26,6 +27,7 @@ class LocalLLM:
         self.base_model = base_model or model
         self._base_url = base_url
         self._client = ollama.Client(host=self._base_url)
+        self._stream_lock = threading.Lock()
         self.previous_adapter_path: str | None = None
         self._unsloth_model = None
         self._unsloth_tokenizer = None
@@ -162,6 +164,77 @@ class LocalLLM:
             },
         )
         return response.get("message", {}).get("content", "").strip()
+
+    def stream_grounded_answer(
+        self, context_text: str, query: str
+    ) -> Iterator[str]:
+        """Stream plain-text answer chunks (language surface) after graph context is fixed."""
+        prompt = (
+            "You ground answers in the graph context below. "
+            "Write a clear, direct answer in plain text only. "
+            "Do not output JSON or code fences.\n\n"
+            f"Query:\n{query}\n\nContext:\n{context_text}\n"
+        )
+        if self._unsloth_model is not None and self._unsloth_tokenizer is not None:
+            yield self._run_generation(prompt)
+            return
+        with self._stream_lock:
+            stream = self._client.chat(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                options={
+                    "temperature": self.temperature,
+                    "num_predict": self.max_tokens,
+                },
+                stream=True,
+            )
+            for chunk in stream:
+                msg = chunk.get("message") if isinstance(chunk, dict) else None
+                if isinstance(msg, dict):
+                    delta = msg.get("content") or ""
+                    if delta:
+                        yield delta
+
+    def ground_streamed_answer(
+        self, context_text: str, query: str, answer: str
+    ) -> dict:
+        """TS second pass: substrate fixed; answer text fixed — score grounding + hypotheses only."""
+        safe_answer = (answer or "").strip()
+        if len(safe_answer) > 12000:
+            safe_answer = safe_answer[:12000] + "…"
+        prompt = (
+            "The answer below was produced from the graph context. Do NOT rewrite the answer.\n"
+            "Return ONLY valid JSON with keys: confidence (float 0..1), reasoning_trace (string), "
+            "hypotheses (array of 2-3 objects with keys text (string), confidence (float 0..1)).\n"
+            "Score how well the answer is grounded in the context.\n\n"
+            f"Query:\n{query}\n\nContext:\n{context_text}\n\nAnswer:\n{safe_answer}\n"
+        )
+        with self._stream_lock:
+            content = self._run_generation(prompt)
+        parsed = self._parse_json(content)
+        confidence = float(parsed.get("confidence", 0.0))
+        reasoning_trace = str(parsed.get("reasoning_trace", "")).strip()
+        raw_hypotheses = parsed.get("hypotheses", [])
+        hypotheses: List[Dict[str, Any]] = []
+        if isinstance(raw_hypotheses, list):
+            for item in raw_hypotheses[:3]:
+                if not isinstance(item, dict):
+                    continue
+                text = str(item.get("text", "")).strip()
+                if not text:
+                    continue
+                hypotheses.append(
+                    {
+                        "text": text,
+                        "confidence": float(item.get("confidence", 0.0)),
+                        "supporting_nodes": [],
+                    }
+                )
+        return {
+            "confidence": max(0.0, min(confidence, 1.0)),
+            "reasoning_trace": reasoning_trace,
+            "hypotheses": hypotheses,
+        }
 
     def health_check(self) -> dict:
         status = {

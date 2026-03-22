@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { HeroSection } from "@/components/hero/HeroSection";
+import { TSPipelineSection } from "@/components/sections/TSPipelineSection";
 import { TSPhilosophy } from "@/components/sections/TSPhilosophy";
 import { WaveProgress } from "@/components/sections/WaveProgress";
 import { REPOS, SOCIAL_LINKS, SITE_META } from "@/lib/tsData";
@@ -7,6 +8,7 @@ import Link from "next/link";
 import { Github, ExternalLink, ArrowRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
   title: SITE_META.title,
@@ -21,6 +23,10 @@ export default function HomePage() {
       {/* Wave 2: Hero (full graph interactive — Wave 2) */}
       <HeroSection />
 
+      <div className="ts-divider mx-auto max-w-7xl" />
+
+      <TSPipelineSection />
+
       {/* Divider */}
       <div className="ts-divider mx-auto max-w-7xl" />
 
@@ -30,18 +36,21 @@ export default function HomePage() {
       {/* Divider */}
       <div className="ts-divider mx-auto max-w-7xl" />
 
-      {/* Projects teaser */}
+      {/* Projects — bento-style pinned nodes */}
       <section className="ts-section">
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-10">
             <div>
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-ts-purple/30 bg-ts-purple/5 text-xs font-mono text-ts-purple mb-3">
-                <Github className="w-3 h-3" />
-                Pinned Nodes
+              <div className="ts-phase-pill mb-3">
+                <Github className="w-3 h-3 text-ts-purple" />
+                Pinned nodes
               </div>
-              <h2 className="text-3xl sm:text-4xl font-bold text-white">
-                Core Repositories
+              <h2 className="text-3xl sm:text-4xl font-bold text-white tracking-tight">
+                Core repositories
               </h2>
+              <p className="text-sm text-muted-foreground mt-2 max-w-lg">
+                High-stability clusters in the public graph — same purple/black node language as the rest of the site.
+              </p>
             </div>
             <Button variant="outline" size="sm" asChild>
               <Link href="/projects">
@@ -52,13 +61,17 @@ export default function HomePage() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {pinnedRepos.map((repo) => (
+            {pinnedRepos.map((repo, i) => (
               <Link
                 key={repo.id}
                 href={repo.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="ts-card p-5 block group"
+                className={cn(
+                  "ts-surface-panel p-5 sm:p-6 block group h-full min-h-[160px]",
+                  i === 0 && "sm:col-span-2 lg:col-span-2",
+                  i === 3 && "sm:col-span-2 lg:col-span-2"
+                )}
               >
                 {/* Stability indicator */}
                 <div className="flex items-center justify-between mb-3">
@@ -72,10 +85,20 @@ export default function HomePage() {
                   <ExternalLink className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-ts-purple transition-colors flex-shrink-0" />
                 </div>
 
-                <h3 className="font-mono font-semibold text-sm text-ts-purple-light mb-2 group-hover:text-ts-purple transition-colors">
+                <h3
+                  className={cn(
+                    "font-mono font-semibold text-sm text-ts-purple-light mb-2 group-hover:text-ts-purple transition-colors",
+                    i === 0 && "sm:text-base"
+                  )}
+                >
                   {repo.name}
                 </h3>
-                <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3 mb-4">
+                <p
+                  className={cn(
+                    "text-xs text-muted-foreground leading-relaxed mb-4 line-clamp-3",
+                    i === 0 && "sm:line-clamp-4 sm:text-sm"
+                  )}
+                >
                   {repo.description}
                 </p>
 
@@ -110,11 +133,11 @@ export default function HomePage() {
       {/* Connect CTA */}
       <section className="ts-section">
         <div className="max-w-3xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-ts-purple/30 bg-ts-purple/5 text-xs font-mono text-ts-purple mb-6">
+          <div className="ts-phase-pill mb-6 justify-center">
             <span className="w-1.5 h-1.5 rounded-full bg-ts-purple animate-ping-slow" />
-            Network Node
+            Open edge
           </div>
-          <h2 className="text-4xl sm:text-5xl font-bold text-white mb-4">
+          <h2 className="text-4xl sm:text-5xl font-bold text-white mb-4 tracking-tight">
             Push a{" "}
             <span className="ts-gradient-text">Node</span>
           </h2>

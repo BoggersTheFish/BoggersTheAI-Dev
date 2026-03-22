@@ -93,7 +93,7 @@ export default function RootLayout({
       className={`dark ${inter.variable} ${jetbrainsMono.variable}`}
       suppressHydrationWarning
     >
-      <body className="bg-black text-[#F0F0F0] font-sans antialiased min-h-screen overflow-x-hidden">
+      <body className="text-[#F0F0F0] font-sans antialiased min-h-screen overflow-x-hidden">
         <Providers>
           <Nav />
           <main className="flex-1">{children}</main>

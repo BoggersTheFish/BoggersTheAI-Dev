@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, List, Protocol
+from typing import Any, Dict, Iterable, Iterator, List, Protocol
 
 from .graph.universal_living_graph import UniversalLivingGraph
 from .metrics import metrics
@@ -40,6 +40,10 @@ class InferenceProtocol(Protocol):
 
 class LocalLLMProtocol(Protocol):
     def summarize_and_hypothesize(self, context: str, query: str) -> dict: ...
+
+    def ground_streamed_answer(
+        self, context: str, query: str, answer: str
+    ) -> dict: ...
 
 
 class IngestProtocol(Protocol):
@@ -84,6 +88,24 @@ class QueryAdapters:
 
 
 @dataclass(slots=True)
+class PipelineSnapshot:
+    """Graph substrate state after retrieval / explore / tools — before language synthesis."""
+
+    query: str
+    session_id: str | None
+    concepts: List[str]
+    topics: List[str]
+    context: List[Node]
+    sufficiency: float
+    explored: bool
+    probe_node_id: str | None
+    used_research: bool
+    used_tool: bool
+    tool_name: str | None
+    pipeline_notes: str
+
+
+@dataclass(slots=True)
 class QueryResponse:
     query: str
     topics: List[str]
@@ -100,6 +122,8 @@ class QueryResponse:
     confidence: float
     reasoning_trace: str
     answer: str
+    # Union path for live graph: synthesis context ∪ probe (if explored) ∪ query node.
+    path_node_ids: List[str]
 
 
 class QueryProcessor:
@@ -120,30 +144,57 @@ class QueryProcessor:
         self.local_llm = local_llm
         self.self_improvement_config = self.inference_config.get("self_improvement", {})
 
-    def process_query(self, query: str) -> QueryResponse:
+    def process_query(
+        self, query: str, session_id: str | None = None
+    ) -> QueryResponse:
         metrics.increment("queries_total")
         with metrics.timer("query_processing"):
-            return self._process_query_inner(query)
+            return self._process_query_inner(query, session_id=session_id)
 
-    def _process_query_inner(self, query: str) -> QueryResponse:
+    def _run_pipeline_snapshot(
+        self, query: str, session_id: str | None = None
+    ) -> PipelineSnapshot:
         concepts = self._resolve_concepts(query)
         topics = concepts
         top_k = int(self.synthesis_config.get("top_k_nodes", 12))
         context = self._retrieve_context_for_concepts(concepts, top_k)
         sufficiency = self._score_sufficiency(context)
         explored = False
+        probe_node_id: str | None = None
+
+        if sufficiency < self.min_sufficiency:
+            metrics.increment("queries_sufficiency_below_threshold")
 
         explore_on_miss = bool(self.synthesis_config.get("explore_on_miss", True))
+        explore_on_session = bool(
+            self.synthesis_config.get("explore_on_session_query", True)
+        )
         explorer = getattr(self.graph, "explore_user_input", None)
-        if (
-            sufficiency < self.min_sufficiency
-            and explore_on_miss
-            and callable(explorer)
-        ):
-            cycles = int(self.synthesis_config.get("explore_wave_cycles", 2))
+        low_miss = sufficiency < self.min_sufficiency and explore_on_miss
+        session_pass = (
+            bool(session_id and str(session_id).strip())
+            and explore_on_session
+            and sufficiency >= self.min_sufficiency
+        )
+
+        if callable(explorer) and (low_miss or session_pass):
+            if low_miss:
+                cycles = int(self.synthesis_config.get("explore_wave_cycles", 2))
+                metrics.increment("queries_explore_on_miss")
+            else:
+                cycles = int(self.synthesis_config.get("explore_session_wave_cycles", 1))
+                metrics.increment("queries_explore_on_session")
+            cycles = max(1, min(cycles, 6))
             try:
-                explorer(query, concepts, wave_cycles=cycles)
+                probe = explorer(
+                    query,
+                    concepts,
+                    wave_cycles=cycles,
+                    session_id=session_id,
+                )
+                probe_node_id = probe.id if probe is not None else None
                 explored = True
+                metrics.increment("queries_explored")
             except Exception as exc:
                 logger.warning("Graph exploration failed: %s", exc)
             context = self._retrieve_context_for_concepts(concepts, top_k)
@@ -169,19 +220,195 @@ class QueryProcessor:
 
         used_tool = False
         tool_name: str | None = None
-        consolidated_merges = 0
-        insight_path: str | None = None
-        hypotheses: List[dict] = []
-        confidence = 0.0
-        reasoning_trace = ""
 
         tool_node = self._execute_tool_if_needed(query, concepts, sufficiency)
         if tool_node is not None:
             context = [tool_node, *context]
             used_tool = True
             tool_name = tool_node.topics[0] if tool_node.topics else None
+            metrics.increment("queries_used_tool")
 
         pipeline_notes = self._build_pipeline_notes(concepts, explored, sufficiency)
+        return PipelineSnapshot(
+            query=query,
+            session_id=session_id,
+            concepts=concepts,
+            topics=topics,
+            context=context,
+            sufficiency=sufficiency,
+            explored=explored,
+            probe_node_id=probe_node_id,
+            used_research=used_research,
+            used_tool=used_tool,
+            tool_name=tool_name,
+            pipeline_notes=pipeline_notes,
+        )
+
+    def process_query_stream(
+        self, query: str, session_id: str | None = None
+    ) -> Iterator[Dict[str, Any]]:
+        """Graph phases complete first; then stream language tokens (TS substrate → surface)."""
+        metrics.increment("queries_total")
+        metrics.increment("queries_stream_sessions")
+        with metrics.timer("query_substrate"):
+            snap = self._run_pipeline_snapshot(query, session_id=session_id)
+        ctx_ids = [node.id for node in snap.context]
+        yield {
+            "type": "phase",
+            "phase": "graph",
+            "sufficiency": snap.sufficiency,
+            "context_nodes": ctx_ids,
+            "explored": snap.explored,
+            "probe_node_id": snap.probe_node_id,
+        }
+        parts: List[str] = []
+        try:
+            for delta in self._synthesize_stream_chunks(snap):
+                if delta:
+                    parts.append(delta)
+                    yield {"type": "token", "delta": delta}
+        except Exception as exc:
+            logger.warning("Stream synthesis failed: %s", exc)
+            yield {"type": "error", "ok": False, "message": str(exc)}
+            return
+        answer = "".join(parts).strip()
+        if not answer:
+            answer, hypotheses, confidence, reasoning_trace = self._synthesize(
+                snap.query, snap.context, pipeline_notes=snap.pipeline_notes
+            )
+        else:
+            grounded = self._ground_streamed_answer(snap, answer)
+            if grounded is not None:
+                hypotheses, confidence, reasoning_trace = grounded
+            else:
+                hypotheses = []
+                confidence = 0.55
+                reasoning_trace = snap.pipeline_notes.strip()
+        min_confidence_for_log = float(
+            self.self_improvement_config.get("min_confidence_for_log", 0.7)
+        )
+        trace_logging_enabled = bool(
+            self.self_improvement_config.get("trace_logging_enabled", True)
+        )
+        if (
+            trace_logging_enabled
+            and confidence > min_confidence_for_log
+            and reasoning_trace
+        ):
+            self._log_reasoning_trace(
+                query=snap.query,
+                answer=answer,
+                hypotheses=hypotheses,
+                confidence=confidence,
+                reasoning_trace=reasoning_trace,
+            )
+        query_node = self._consolidate(snap.query, snap.topics, snap.context, answer)
+        consolidated_merges = 0
+        insight_path: str | None = None
+        if self.adapters.consolidation:
+            consolidation_result = self.adapters.consolidation.consolidate(
+                self.graph, nodes=[*snap.context, query_node]
+            )
+            consolidated_merges = int(getattr(consolidation_result, "merged_count", 0))
+        if self.adapters.insight and self.adapters.insight_vault_path:
+            source_nodes = [node.id for node in snap.context[:8]] + [query_node.id]
+            insight_path = self.adapters.insight.write_insight(
+                content=answer,
+                topics=snap.topics,
+                source_nodes=source_nodes,
+                vault_path=self.adapters.insight_vault_path,
+            )
+            extracted = self.adapters.insight.extract_hypotheses(answer, snap.topics)
+            for item in extracted:
+                hypotheses.append(
+                    {
+                        "text": item,
+                        "confidence": 0.35,
+                        "supporting_nodes": [node.id for node in snap.context[:3]],
+                    }
+                )
+        path_node_ids: List[str] = []
+        seen_path: set[str] = set()
+        for nid in ctx_ids:
+            if nid not in seen_path:
+                seen_path.add(nid)
+                path_node_ids.append(nid)
+        if snap.probe_node_id and snap.probe_node_id not in seen_path:
+            seen_path.add(snap.probe_node_id)
+            path_node_ids.append(snap.probe_node_id)
+        if query_node.id not in seen_path:
+            path_node_ids.append(query_node.id)
+        response = QueryResponse(
+            query=snap.query,
+            topics=snap.topics,
+            context=snap.context,
+            sufficiency_score=snap.sufficiency,
+            used_research=snap.used_research,
+            used_tool=snap.used_tool,
+            tool_name=snap.tool_name,
+            context_nodes=ctx_ids,
+            activation_scores=[node.activation for node in snap.context],
+            consolidated_merges=consolidated_merges,
+            insight_path=insight_path,
+            hypotheses=hypotheses,
+            confidence=confidence,
+            reasoning_trace=reasoning_trace,
+            answer=answer,
+            path_node_ids=path_node_ids[:128],
+        )
+        yield {"type": "done", "response": response}
+
+    def _synthesize_stream_chunks(self, snap: PipelineSnapshot) -> Iterator[str]:
+        """Stream plain-text answer chunks after graph phases; substrate is fixed."""
+        context_text = self._render_context_text(
+            snap.context, pipeline_notes=snap.pipeline_notes
+        )
+        strict = bool(self.synthesis_config.get("strict_graph_pipeline", True))
+        ollama_cfg = self.inference_config.get("ollama", {})
+        stream_enabled = bool(self.synthesis_config.get("stream_synthesis", True))
+        if (
+            stream_enabled
+            and isinstance(ollama_cfg, dict)
+            and bool(ollama_cfg.get("enabled", False))
+            and self.local_llm is not None
+            and hasattr(self.local_llm, "stream_grounded_answer")
+        ):
+            stream_fn = getattr(self.local_llm, "stream_grounded_answer")
+            with metrics.timer("query_stream_synthesis"):
+                yield from stream_fn(context_text, snap.query)
+            return
+        if strict:
+            yield (
+                "LLM synthesis is unavailable. Ensure Ollama is running and the "
+                "configured chat model is pulled (e.g. ollama pull llama3.2)."
+            )
+            return
+        answer, _, _, _ = self._synthesize(
+            snap.query, snap.context, pipeline_notes=snap.pipeline_notes
+        )
+        yield answer
+
+    def _process_query_inner(
+        self, query: str, session_id: str | None = None
+    ) -> QueryResponse:
+        snap = self._run_pipeline_snapshot(query, session_id=session_id)
+        concepts = snap.concepts
+        topics = snap.topics
+        context = snap.context
+        sufficiency = snap.sufficiency
+        explored = snap.explored
+        probe_node_id = snap.probe_node_id
+        used_research = snap.used_research
+        used_tool = snap.used_tool
+        tool_name = snap.tool_name
+        pipeline_notes = snap.pipeline_notes
+
+        consolidated_merges = 0
+        insight_path: str | None = None
+        hypotheses: List[dict] = []
+        confidence = 0.0
+        reasoning_trace = ""
+
         answer, hypotheses, confidence, reasoning_trace = self._synthesize(
             query, context, pipeline_notes=pipeline_notes
         )
@@ -226,6 +453,19 @@ class QueryProcessor:
                         "supporting_nodes": [node.id for node in context[:3]],
                     }
                 )
+        ctx_ids = [node.id for node in context]
+        path_node_ids: List[str] = []
+        seen_path: set[str] = set()
+        for nid in ctx_ids:
+            if nid not in seen_path:
+                seen_path.add(nid)
+                path_node_ids.append(nid)
+        if probe_node_id and probe_node_id not in seen_path:
+            seen_path.add(probe_node_id)
+            path_node_ids.append(probe_node_id)
+        if query_node.id not in seen_path:
+            path_node_ids.append(query_node.id)
+
         return QueryResponse(
             query=query,
             topics=topics,
@@ -234,7 +474,7 @@ class QueryProcessor:
             used_research=used_research,
             used_tool=used_tool,
             tool_name=tool_name,
-            context_nodes=[node.id for node in context],
+            context_nodes=ctx_ids,
             activation_scores=[node.activation for node in context],
             consolidated_merges=consolidated_merges,
             insight_path=insight_path,
@@ -242,6 +482,7 @@ class QueryProcessor:
             confidence=confidence,
             reasoning_trace=reasoning_trace,
             answer=answer,
+            path_node_ids=path_node_ids[:128],
         )
 
     def _execute_tool_if_needed(
@@ -518,6 +759,55 @@ class QueryProcessor:
             "extractive_fallback",
         )
 
+    def _ground_streamed_answer(
+        self, snap: PipelineSnapshot, answer: str
+    ) -> tuple[List[dict], float, str] | None:
+        """Second pass after token streaming: score grounding + hypotheses; answer text unchanged."""
+        if not bool(self.synthesis_config.get("stream_synthesis_grounding_pass", True)):
+            return None
+        ollama_cfg = self.inference_config.get("ollama", {})
+        if (
+            not isinstance(ollama_cfg, dict)
+            or not bool(ollama_cfg.get("enabled", False))
+            or self.local_llm is None
+        ):
+            return None
+        context_text = self._render_context_text(
+            snap.context, pipeline_notes=snap.pipeline_notes
+        )
+        max_retries = int(self.synthesis_config.get("max_retries", 2))
+        for attempt in range(max_retries):
+            try:
+                llm_output = self.local_llm.ground_streamed_answer(
+                    context_text, snap.query, answer
+                )
+                hypotheses = llm_output.get("hypotheses", [])
+                if not isinstance(hypotheses, list):
+                    hypotheses = []
+                hypotheses = self._check_hypothesis_consistency(
+                    hypotheses, snap.context
+                )
+                confidence = float(llm_output.get("confidence", 0.0))
+                reasoning_trace = str(llm_output.get("reasoning_trace", "")).strip()
+                base_trace = snap.pipeline_notes.strip()
+                if reasoning_trace:
+                    reasoning_trace = f"{base_trace}\n\n{reasoning_trace}".strip()
+                else:
+                    reasoning_trace = base_trace
+                metrics.increment("query_stream_grounding_ok")
+                return (
+                    hypotheses,
+                    max(0.0, min(confidence, 1.0)),
+                    reasoning_trace,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Stream grounding attempt %d failed: %s", attempt + 1, exc
+                )
+                if attempt == max_retries - 1:
+                    metrics.increment("query_stream_grounding_fail")
+        return None
+
     def _check_hypothesis_consistency(
         self, hypotheses: List[dict], context_nodes: List[Node]
     ) -> List[dict]:
@@ -649,6 +939,7 @@ def process_query(
     synthesis_config: dict | None = None,
     inference_config: dict | None = None,
     local_llm: LocalLLMProtocol | None = None,
+    session_id: str | None = None,
 ) -> QueryResponse:
     processor = QueryProcessor(
         graph=graph,
@@ -657,4 +948,4 @@ def process_query(
         inference_config=inference_config,
         local_llm=local_llm,
     )
-    return processor.process_query(query)
+    return processor.process_query(query, session_id=session_id)

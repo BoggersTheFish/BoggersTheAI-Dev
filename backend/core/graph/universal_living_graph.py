@@ -406,15 +406,37 @@ class UniversalLivingGraph:
         query: str,
         concepts: list[str],
         wave_cycles: int = 2,
+        session_id: str | None = None,
     ) -> Node:
         """Inject the user prompt as a high-activation probe, link into the graph, run waves."""
         digest = hashlib.sha256(query.encode("utf-8")).hexdigest()[:14]
         node_id = f"user_probe:{digest}"
+        sid = (str(session_id).strip()[:128] if session_id else "") or None
         topics = [c.strip() for c in concepts if c.strip()][:12] or ["user_input"]
+        probe_attrs: dict = {"type": "user_probe", "explore": True}
+        if sid:
+            probe_attrs["session_id"] = sid
         existing = self.get_node(node_id)
         is_new = existing is None
         if existing is not None:
             self.update_activation(node_id, 0.25)
+            if sid:
+                ex = self.nodes.get(node_id)
+                if ex is not None:
+                    merged = dict(ex.attributes or {})
+                    if merged.get("session_id") != sid:
+                        merged["session_id"] = sid
+                        self.add_node(
+                            node_id=node_id,
+                            content=ex.content,
+                            topics=ex.topics,
+                            activation=ex.activation,
+                            stability=ex.stability,
+                            base_strength=ex.base_strength,
+                            last_wave=ex.last_wave,
+                            attributes=merged,
+                            embedding=ex.embedding,
+                        )
         else:
             self.add_node(
                 node_id=node_id,
@@ -423,7 +445,7 @@ class UniversalLivingGraph:
                 activation=0.9,
                 stability=0.42,
                 base_strength=0.58,
-                attributes={"type": "user_probe", "explore": True},
+                attributes=probe_attrs,
             )
         if is_new:
             active = [

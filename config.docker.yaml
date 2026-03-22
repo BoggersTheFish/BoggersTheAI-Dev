@@ -54,6 +54,10 @@ inference:
     decompose_with_llm: true
     explore_on_miss: true
     explore_wave_cycles: 2
+    explore_on_session_query: true
+    explore_session_wave_cycles: 1
+    stream_synthesis: true
+    stream_synthesis_grounding_pass: true
     ingest_after_explore: false
     strict_graph_pipeline: true
 

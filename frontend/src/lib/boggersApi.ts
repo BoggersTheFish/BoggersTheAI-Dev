@@ -31,3 +31,18 @@ export function getSessionHeaders(): Record<string, string> {
     return {};
   }
 }
+
+/** Session + optional tenant (hard graph isolation when `NEXT_PUBLIC_BOGGERS_TENANT_ID` is set). */
+export function getTenantIdForQuery(): string {
+  if (typeof process === "undefined") return "";
+  return process.env.NEXT_PUBLIC_BOGGERS_TENANT_ID?.trim() ?? "";
+}
+
+export function getBoggersHeaders(): Record<string, string> {
+  const h: Record<string, string> = { ...getSessionHeaders() };
+  const tenant = getTenantIdForQuery();
+  if (tenant) {
+    h["X-Boggers-Tenant-ID"] = tenant;
+  }
+  return h;
+}

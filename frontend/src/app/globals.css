@@ -12,7 +12,7 @@
   }
 
   body {
-    @apply bg-black text-[#F0F0F0];
+    @apply bg-black text-[#F0F0F0] ts-app-bg;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -49,6 +49,35 @@
 }
 
 @layer components {
+  /* Site-wide: subtle purple haze + same grid DNA as hero */
+  .ts-app-bg {
+    background-color: #000;
+    background-image:
+      radial-gradient(ellipse 90% 55% at 50% -15%, rgba(160, 32, 240, 0.14), transparent 52%),
+      linear-gradient(rgba(160, 32, 240, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(160, 32, 240, 0.035) 1px, transparent 1px);
+    background-size: auto, 50px 50px, 50px 50px;
+    background-attachment: fixed;
+  }
+
+  /* TS layout: fixed graph/memory column (substrate) */
+  .ts-substrate-rail {
+    @apply border-l border-ts-purple/30 pl-4 sm:pl-5;
+    box-shadow: inset 12px 0 48px -12px rgba(160, 32, 240, 0.06);
+  }
+
+  /* Chat / panels: language surface */
+  .ts-surface-panel {
+    @apply rounded-2xl border border-ts-purple/25 bg-[#050505]/95 backdrop-blur-md;
+    box-shadow:
+      0 0 0 1px rgba(160, 32, 240, 0.08),
+      0 20px 50px rgba(0, 0, 0, 0.75);
+  }
+
+  .ts-phase-pill {
+    @apply inline-flex items-center gap-2 rounded-full border border-ts-purple/35 bg-black/50 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-ts-purple-light;
+  }
+
   /* Animated purple grid background */
   .ts-grid-bg {
     background-image:
@@ -166,6 +195,11 @@ html.light {
   body {
     background-color: #0a0a12;
     color: #e8e8f0;
+    background-image:
+      radial-gradient(ellipse 90% 55% at 50% -15%, rgba(160, 32, 240, 0.1), transparent 52%),
+      linear-gradient(rgba(160, 32, 240, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(160, 32, 240, 0.05) 1px, transparent 1px);
+    background-size: auto, 50px 50px, 50px 50px;
   }
   .ts-card {
     background-color: #0f0f1a;

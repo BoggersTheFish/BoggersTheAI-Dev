@@ -54,9 +54,9 @@ export function WaveProgress() {
           transition={{ duration: 0.5 }}
           className="mb-12"
         >
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-ts-purple/30 bg-ts-purple/5 text-xs font-mono text-ts-purple mb-4">
-            <Zap className="w-3 h-3" />
-            Wave Progress Log
+          <div className="ts-phase-pill mb-4">
+            <Zap className="w-3 h-3 text-ts-purple" />
+            Wave log
           </div>
           <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">
             Evolution of the System

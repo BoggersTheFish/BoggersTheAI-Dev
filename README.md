@@ -1,26 +1,29 @@
 # BoggersTheAI-Dev
 
-**Integrated development and deployment stack for the Thinking System / TS-OS** — combining the official [**BoggersTheAI**](https://github.com/BoggersTheFish/BoggersTheAI) runtime (FastAPI, wave engine, SQLite graph, Ollama) with the [**boggersthefish-site**](https://github.com/BoggersTheFish/boggersthefish-site) Next.js frontend so the public site talks to a **real** TS-OS instance, not just the client-side mini-simulator.
+**Monorepo for the Thinking System (TS-OS)** — the [**BoggersTheAI**](https://github.com/BoggersTheFish/BoggersTheAI) Python runtime (FastAPI, universal graph, wave cycle, Ollama) plus the Next.js frontend so the **site is not a brochure**: it proxies to a **live** graph-backed API. The client never holds secrets; the browser only talks **same-origin** to `/api/boggers/*`.
 
-Tracks the [boggersthefish.com](https://boggersthefish.com) roadmap through **Wave 16** (complete).
+In TS terms: **substrate first, surface second.** Retrieval, exploration, and sufficiency run on the graph **before** any LLM token is emitted; streaming is the **language surface** on top of fixed context; an optional **grounding pass** scores confidence and hypotheses without rewriting the streamed answer.
+
+Roadmap through **Wave 16** (complete) — see [boggersthefish.com](https://boggersthefish.com).
 
 ---
 
 ## Table of contents
 
 1. [Roadmap status](#roadmap-status)
-2. [Architecture](#architecture)
-3. [How the site, Lab, and AI connect](#how-the-site-lab-and-ai-connect)
-4. [Repository layout](#repository-layout)
-5. [Prerequisites](#prerequisites)
-6. [Quick start (Docker)](#quick-start-docker)
-7. [VPS hosting — step by step](#vps-hosting--step-by-step)
-8. [Local development (no Docker)](#local-development-no-docker)
-9. [Configuration reference](#configuration-reference)
-10. [API surface](#api-surface)
-11. [Troubleshooting](#troubleshooting)
-12. [Documentation index](#documentation-index)
-13. [License](#license)
+2. [TS execution model](#ts-execution-model)
+3. [Architecture](#architecture)
+4. [How the site, Lab, and AI connect](#how-the-site-lab-and-ai-connect)
+5. [Repository layout](#repository-layout)
+6. [Prerequisites](#prerequisites)
+7. [Quick start (Docker)](#quick-start-docker)
+8. [VPS hosting — step by step](#vps-hosting--step-by-step)
+9. [Local development (no Docker)](#local-development-no-docker)
+10. [Configuration reference](#configuration-reference)
+11. [API surface](#api-surface)
+12. [Troubleshooting](#troubleshooting)
+13. [Documentation index](#documentation-index)
+14. [License](#license)
 
 ---
 
@@ -36,11 +39,23 @@ Tracks the [boggersthefish.com](https://boggersthefish.com) roadmap through **Wa
 
 ---
 
+## TS execution model
+
+| Layer | What it is | In this repo |
+|--------|------------|----------------|
+| **Substrate** | Constraint graph + session state: decomposition, activated subgraph, exploration, wave-adjacent work. Must be **settled** (for the query) before language. | `QueryProcessor` pipeline snapshot, SQLite / sharded graph, `GET /graph`, SSE `GET /graph/stream` for live viz. |
+| **Surface** | Tokens and UI copy — pressure release on fixed context, not a second retrieval pass. | `POST /query/stream` emits `phase` → `token` → `done`; Next `/chat` consumes the stream after graph phases complete. |
+| **Grounding** (optional) | Align **confidence**, **hypotheses**, and **reasoning_trace** with batch-style synthesis **without** replacing the streamed answer text. | `LocalLLM.ground_streamed_answer` when `inference.synthesis.stream_synthesis_grounding_pass` is true (default). |
+
+**Order is fixed:** substrate phases → stream → optional grounding JSON pass. That is the same “TS logic” the public site describes: graph memory is not an appendix to the chat bubble.
+
+---
+
 ## Architecture
 
 ```mermaid
 flowchart TB
-  subgraph browser [Browser]
+  subgraph browser [Browser — surface]
     UI[Next.js UI]
     WASM[Wave 15 WASM engine]
   end
@@ -50,7 +65,7 @@ flowchart TB
     PH["/api/boggers/* proxy"]
   end
 
-  subgraph py [Backend container :8000]
+  subgraph py [Backend container :8000 — substrate + orchestration]
     API[FastAPI dashboard]
     RT[BoggersRuntime + graph]
     NEG[Wave 16 AgentNegotiator]
@@ -73,27 +88,30 @@ flowchart TB
   RT --> RD
   RT --> DB
   RT -->|HTTP| OL
-  WASM -.->|fallback when offline| UI
+  WASM -.->|offline propagate/relax| UI
 ```
 
-- **Browser** calls only `/api/boggers/*` (same-origin). `BOGGERS_DASHBOARD_TOKEN` is never exposed to the client.
-- **Next proxy** forwards to `BOGGERS_INTERNAL_URL` (internal Docker network).
-- **Backend** reads `config.docker.yaml` (mounted at `/app/config.yaml`) with Ollama at `http://ollama:11434`.
-- **Wave 15 WASM**: browser-local fallback when Docker is offline — same propagate/relax math as Python.
-- **Wave 16 agents**: `explorer`, `consolidator`, `synthesizer` — negotiate activation over tense graph nodes via Redis.
+- **Browser** calls only `/api/boggers/*` (same-origin). `BOGGERS_DASHBOARD_TOKEN` stays server-side.
+- **Next proxy** forwards to `BOGGERS_INTERNAL_URL` (Docker network or `127.0.0.1` in dev).
+- **Backend** loads `config.docker.yaml` (mounted at `/app/config.yaml`); Ollama at `http://ollama:11434`.
+- **Wave 15 WASM**: browser-local fallback — same propagate/relax semantics as Python when the stack is down.
+- **Wave 16**: agents negotiate over tense regions of the graph via Redis-backed registry.
+- **Graph HTTP**: `GET /graph` and SSE `GET /graph/stream` are rate-limited (gentle) to protect the dashboard from abuse while keeping the UI responsive.
 
 ---
 
 ## How the site, Lab, and AI connect
 
-| Visitor action | Browser calls | Next.js | Backend | Data |
-|----------------|---------------|---------|---------|------|
+| Visitor action | Browser calls | Next.js | Backend | TS layer |
+|----------------|---------------|---------|---------|--------|
 | Any page | `GET /…` | Renders UI | — | — |
-| Lab live stats | `GET /api/boggers/status` | Proxy | `GET /status` | Graph + wave |
-| **Push a Node** | `POST /api/boggers/query` | Proxy + Bearer | `POST /query → handle_query` | Graph + Ollama |
-| Push a Node (offline) | — | — | — | **Wave 15 WASM engine** answers locally |
-| `/wasm` page | `GET /wasm` | Serves page | Optional | Browser WASM or TS fallback |
-| `/waves` page | `GET /api/boggers/agents/list` | Proxy | Wave 16 agent registry | Redis / memory |
+| Lab live stats | `GET /api/boggers/status` | Proxy | `GET /status` | Substrate metrics |
+| **Chat / streamed query** | `POST /api/boggers/query/stream` | Proxy + Bearer | `POST /query/stream` → graph phases, then tokens, then optional grounding | Substrate → surface → grounding |
+| **Batch query** | `POST /api/boggers/query` | Proxy + Bearer | `POST /query` | Full pipeline in one response |
+| Offline Lab | — | — | — | **Wave 15 WASM** = surface-only fallback (local wave math) |
+| `/wasm` | `GET /wasm` | Serves page | Optional | WASM or TS mirror |
+| `/waves` | `GET /api/boggers/agents/list` | Proxy | Wave 16 registry | Multi-agent substrate |
+| Live graph panel | `GET /api/boggers/graph/stream` (SSE) | Proxy | `GET /graph/stream` | Session-filtered substrate snapshot |
 
 ---
 
@@ -458,6 +476,8 @@ YAML config for graph, wave, Ollama, and emergence parameters lives in `config.d
 ```yaml
 inference.ollama.model: "llama3.2"        # chat model
 inference.ollama.base_url: "http://ollama:11434"
+inference.synthesis.stream_synthesis: true
+inference.synthesis.stream_synthesis_grounding_pass: true  # post-stream JSON: confidence / hypotheses / trace
 embeddings.model: "nomic-embed-text"      # embedding model
 wave.interval_seconds: 30                 # wave cycle frequency
 wave.tension_threshold: 0.20              # emergence threshold
@@ -475,9 +495,11 @@ All routes are proxied by Next.js under `/api/boggers/*`.
 | `GET /health/live` | No | Liveness probe |
 | `GET /health/ready` | Token | Readiness + health checks |
 | `GET /status` | Token | Wave cycle stats + node/edge counts |
-| `GET /graph` | Token | Full graph JSON |
+| `GET /graph` | Token | Full graph JSON (rate-limited) |
+| `GET /graph/stream` | Token | SSE: periodic graph JSON (same shape as `/graph`; rate-limited) |
 | `GET /graph/viz` | Token | Cytoscape.js interactive graph |
-| `POST /query` | Token | Full query pipeline (graph → Ollama synthesis) |
+| `POST /query` | Token | Full query pipeline (graph → synthesis) in one shot |
+| `POST /query/stream` | Token | SSE: `phase` (substrate) → `token` (surface) → `done` with optional grounding metadata |
 | `GET /wave` | Token | Chart.js tension dashboard |
 | `GET /metrics` | Token | Graph + wave metrics |
 | `GET /metrics/prometheus` | Token | Prometheus text format |
@@ -533,4 +555,4 @@ Upstream projects retain their own licenses (BoggersTheAI: MIT). This integratio
 
 ---
 
-*Keep this README updated when changing compose services, env vars, or proxy paths.*
+*Keep this README aligned with the TS execution model when changing query flow, streaming, compose services, env vars, or proxy paths.*

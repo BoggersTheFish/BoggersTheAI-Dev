@@ -14,7 +14,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { boggersUrl, getSessionHeaders } from "@/lib/boggersApi";
+import { boggersUrl, getBoggersHeaders } from "@/lib/boggersApi";
 import {
   getChatSessionId,
   startNewChatSession,
@@ -118,36 +118,83 @@ export function ChatWorkspace() {
     setLoading(true);
     setError("");
 
+    const assistantMsgId = crypto.randomUUID();
+    setMessages((m) => [
+      ...m,
+      {
+        id: assistantMsgId,
+        role: "assistant",
+        content: "",
+        createdAt: Date.now(),
+      },
+    ]);
+
     try {
-      const r = await fetch(boggersUrl("/query"), {
+      const r = await fetch(boggersUrl("/query/stream"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...getSessionHeaders(),
+          Accept: "text/event-stream",
+          ...getBoggersHeaders(),
         },
         body: JSON.stringify({ query: text }),
         signal: AbortSignal.timeout(180000),
       });
-      const data = await r.json().catch(() => ({}));
       if (!r.ok) {
-        throw new Error(
-          (data as { detail?: string }).detail || r.statusText || "Request failed"
-        );
+        const errText = await r.text().catch(() => "");
+        throw new Error(errText || r.statusText || "Request failed");
       }
-      if (!(data as { ok?: boolean }).ok) {
-        throw new Error((data as { error?: string }).error || "Query failed");
+      const reader = r.body?.getReader();
+      if (!reader) throw new Error("No response stream");
+      const decoder = new TextDecoder();
+      let buf = "";
+      let assistantContent = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        for (;;) {
+          const sep = buf.indexOf("\n\n");
+          if (sep < 0) break;
+          const block = buf.slice(0, sep).trim();
+          buf = buf.slice(sep + 2);
+          if (!block.startsWith("data: ")) continue;
+          let ev: Record<string, unknown>;
+          try {
+            ev = JSON.parse(block.slice(6)) as Record<string, unknown>;
+          } catch {
+            continue;
+          }
+          if (ev.type === "token" && typeof ev.delta === "string") {
+            assistantContent += ev.delta;
+            setMessages((m) =>
+              m.map((x) =>
+                x.id === assistantMsgId ? { ...x, content: assistantContent } : x
+              )
+            );
+          }
+          if (ev.type === "error") {
+            throw new Error(String(ev.message ?? "Stream error"));
+          }
+          if (ev.type === "done" && ev.ok) {
+            const ans = String(ev.answer ?? "").trim();
+            if (ans) {
+              assistantContent = ans;
+              setMessages((m) =>
+                m.map((x) =>
+                  x.id === assistantMsgId ? { ...x, content: ans } : x
+                )
+              );
+            }
+          }
+        }
       }
-      const answer = String((data as { answer?: string }).answer ?? "").trim();
-      if (!answer) throw new Error("Empty response");
-      const assistantMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: answer,
-        createdAt: Date.now(),
-      };
-      setMessages((m) => [...m, assistantMsg]);
+      if (!assistantContent.trim()) {
+        throw new Error("Empty response");
+      }
       setGraphTick((t) => t + 1);
     } catch (e) {
+      setMessages((m) => m.filter((x) => x.id !== assistantMsgId));
       const msg =
         e instanceof Error
           ? e.message
@@ -185,24 +232,26 @@ export function ChatWorkspace() {
     }
   };
 
+  const sidShort = sessionId ? `${sessionId.slice(0, 8)}…` : "—";
+
   return (
-    <div className="flex flex-col min-h-[calc(100vh-4rem)] max-w-7xl mx-auto px-3 sm:px-4 pb-4">
-      {/* Header */}
-      <div className="flex-shrink-0 flex flex-wrap items-center justify-between gap-3 py-4 border-b border-ts-purple/20">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl border border-ts-purple/40 bg-ts-purple/10 flex items-center justify-center">
+    <div className="max-w-[1680px] mx-auto px-3 sm:px-5 pb-8">
+      <header className="ts-surface-panel mb-5 px-4 sm:px-5 py-4 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-11 h-11 rounded-xl border border-ts-purple/40 bg-ts-purple/10 flex items-center justify-center shrink-0">
             <Sparkles className="w-5 h-5 text-ts-purple-light" />
           </div>
-          <div>
-            <h1 className="text-lg font-semibold text-white tracking-tight">
-              TS Chat
-            </h1>
-            <p className="text-[11px] text-muted-foreground font-mono">
-              Graph-decomposed retrieval · wave exploration · local LLM synthesis
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <h1 className="text-lg font-semibold text-white tracking-tight">TS Chat</h1>
+              <span className="ts-phase-pill !py-0.5 !text-[9px]">Surface</span>
+            </div>
+            <p className="text-[11px] text-muted-foreground font-mono truncate">
+              Session <span className="text-ts-purple-light/90">{sidShort}</span> — stream after graph phases
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           <button
             type="button"
             onClick={() => checkBackend()}
@@ -222,94 +271,113 @@ export function ChatWorkspace() {
               </>
             )}
           </button>
-          <Button variant="outline" size="sm" className="text-xs" onClick={clearChat}>
+          <Button variant="outline" size="sm" className="text-xs h-8" onClick={clearChat}>
             <Trash2 className="w-3.5 h-3.5 mr-1" />
             Clear
           </Button>
-          <Button variant="default" size="sm" className="text-xs" onClick={newChat}>
+          <Button variant="default" size="sm" className="text-xs h-8" onClick={newChat}>
             <Plus className="w-3.5 h-3.5 mr-1" />
-            New chat
+            New session
           </Button>
         </div>
-      </div>
+      </header>
 
-      <div className="flex flex-col lg:flex-row lg:items-stretch gap-4 flex-1 min-h-0">
-        <div className="flex flex-col flex-1 min-h-0 min-w-0 lg:max-w-[min(100%,36rem)]">
-      {/* Messages */}
-      <div className="flex-1 min-h-[240px] lg:min-h-0 max-h-[min(55vh,420px)] lg:max-h-none lg:flex-1 overflow-y-auto py-4 space-y-4">
-        {messages.length === 0 && !loading && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-center py-12 px-4"
-          >
-            <p className="text-sm text-muted-foreground max-w-md mx-auto leading-relaxed">
-              Ask anything. Each message runs through the TS-OS pipeline: the model
-              breaks your text into concepts, the living graph retrieves and explores
-              them, then Ollama synthesizes the answer—grounded in your session’s
-              graph memory.
-            </p>
-          </motion.div>
-        )}
-        <AnimatePresence initial={false}>
-          {messages.map((m) => (
-            <MessageBubble key={m.id} role={m.role} content={m.content} />
-          ))}
-        </AnimatePresence>
-        {loading && (
-          <div className="flex items-center gap-2 text-muted-foreground text-sm pl-2">
-            <Loader2 className="w-4 h-4 animate-spin text-ts-purple" />
-            <span className="font-mono text-xs">Thinking…</span>
+      <div className="flex flex-col lg:flex-row lg:items-stretch gap-6 lg:gap-0 lg:min-h-[min(640px,calc(100dvh-12rem))]">
+        {/* Substrate — graph completes before tokens (shown first on desktop) */}
+        <aside
+          className={cn(
+            "order-2 lg:order-1 w-full lg:w-[min(100%,440px)] lg:max-w-[440px] shrink-0",
+            "flex flex-col gap-3 lg:pr-5 lg:border-r lg:border-ts-purple/25"
+          )}
+        >
+          <div className="flex items-center justify-between gap-2 px-1">
+            <span className="ts-phase-pill !text-[9px]">
+              <span className="h-1 w-1 rounded-full bg-ts-purple shadow-ts" />
+              Substrate
+            </span>
+            <span className="text-[10px] font-mono text-muted-foreground hidden sm:inline">
+              graph · session · SSE
+            </span>
           </div>
-        )}
-        {error && (
-          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300/90">
-            {error}
-          </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Composer */}
-      <div className="flex-shrink-0 pt-2 border-t border-ts-purple/15">
-        <div className="rounded-xl border border-ts-purple/25 bg-black/60 backdrop-blur-sm p-2">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder="Message TS-OS… (Enter send, Shift+Enter newline)"
-            rows={3}
-            disabled={loading}
-            className={cn(
-              "w-full resize-none bg-transparent px-3 py-2 text-sm text-foreground",
-              "placeholder:text-muted-foreground/40 focus:outline-none",
-              "min-h-[80px] max-h-[200px]"
-            )}
+          <LiveGraphPanel
+            refreshSignal={graphTick}
+            sessionId={sessionId}
+            className="flex-1 min-h-[280px] lg:min-h-[360px]"
           />
-          <div className="flex justify-end px-2 pb-1">
-            <Button
-              type="button"
-              size="sm"
-              disabled={loading || !input.trim()}
-              onClick={send}
-              className="gap-2"
-            >
-              {loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
+        </aside>
+
+        {/* Surface — language */}
+        <div className="order-1 lg:order-2 flex-1 min-w-0 flex flex-col min-h-0 lg:pl-6">
+          <div className="ts-surface-panel flex flex-col flex-1 min-h-[min(520px,70vh)] lg:min-h-0 overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 py-4 space-y-4">
+              {messages.length === 0 && !loading && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-xl border border-ts-purple/15 bg-black/30 px-4 py-8 text-center"
+                >
+                  <p className="text-sm text-muted-foreground max-w-lg mx-auto leading-relaxed">
+                    Messages run{" "}
+                    <span className="text-ts-purple-light font-medium">after</span> the living graph
+                    resolves context and exploration. What you read here is the language surface on top
+                    of that fixed substrate — same order as{" "}
+                    <code className="text-xs font-mono text-ts-purple/90">/query/stream</code>.
+                  </p>
+                </motion.div>
               )}
-              Send
-            </Button>
+              <AnimatePresence initial={false}>
+                {messages.map((m) => (
+                  <MessageBubble key={m.id} role={m.role} content={m.content} />
+                ))}
+              </AnimatePresence>
+              {loading && (
+                <div className="flex items-center gap-2 text-muted-foreground text-sm pl-1">
+                  <Loader2 className="w-4 h-4 animate-spin text-ts-purple" />
+                  <span className="font-mono text-xs">Streaming surface…</span>
+                </div>
+              )}
+              {error && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300/90">
+                  {error}
+                </div>
+              )}
+              <div ref={bottomRef} />
+            </div>
+
+            <div className="flex-shrink-0 border-t border-ts-purple/20 p-3 sm:p-4 bg-black/40">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={onKeyDown}
+                placeholder="Write to the surface… (Enter send, Shift+Enter newline)"
+                rows={3}
+                disabled={loading}
+                className={cn(
+                  "w-full resize-none bg-transparent px-3 py-2 text-sm text-foreground rounded-lg",
+                  "placeholder:text-muted-foreground/45 focus:outline-none focus:ring-1 focus:ring-ts-purple/35",
+                  "min-h-[80px] max-h-[200px]"
+                )}
+              />
+              <div className="flex justify-end mt-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={loading || !input.trim()}
+                  onClick={send}
+                  className="gap-2"
+                >
+                  {loading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                  Send
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-        </div>
-
-        <aside className="w-full lg:w-[min(100%,440px)] lg:flex-shrink-0 flex flex-col min-h-[300px] lg:min-h-[min(560px,calc(100vh-10rem))] lg:sticky lg:top-20 lg:self-start">
-          <LiveGraphPanel refreshSignal={graphTick} className="flex-1 min-h-[280px] lg:min-h-0" />
-        </aside>
       </div>
     </div>
   );
@@ -330,24 +398,21 @@ function MessageBubble({ role, content }: { role: Role; content: string }) {
     <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      className={cn(
-        "flex gap-3",
-        isUser ? "justify-end" : "justify-start"
-      )}
+      className={cn("flex gap-3", isUser ? "justify-end" : "justify-start")}
     >
       <div
         className={cn(
-          "relative max-w-[min(100%,42rem)] rounded-2xl px-4 py-3 text-sm leading-relaxed",
+          "relative max-w-[min(100%,44rem)] rounded-2xl px-4 py-3 text-sm leading-relaxed",
           isUser
-            ? "bg-ts-purple/20 border border-ts-purple/35 text-foreground ml-8"
-            : "bg-zinc-900/90 border border-ts-purple/20 text-zinc-100 mr-8"
+            ? "bg-ts-purple/18 border border-ts-purple/40 text-foreground ml-6 sm:ml-10"
+            : "bg-[#0a0a0a] border border-ts-purple/25 text-zinc-100 mr-6 sm:mr-8"
         )}
       >
-        <div className="whitespace-pre-wrap break-words pr-6">{content}</div>
+        <div className="whitespace-pre-wrap break-words pr-5">{content}</div>
         <div
           className={cn(
             "flex justify-end mt-2 pt-2 border-t",
-            isUser ? "border-ts-purple/20" : "border-white/5"
+            isUser ? "border-ts-purple/25" : "border-white/5"
           )}
         >
           <button

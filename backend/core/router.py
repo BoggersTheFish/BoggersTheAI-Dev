@@ -4,7 +4,7 @@ import logging
 import threading
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Deque, Dict, List, Protocol
+from typing import Deque, Dict, Iterator, List, Protocol
 
 from .graph.universal_living_graph import UniversalLivingGraph
 from .mode_manager import ModeManager
@@ -93,7 +93,9 @@ class QueryRouter:
         self._hypothesis_queue: Deque[str] = deque()
         self._queue_lock = threading.Lock()
 
-    def process_text(self, query: str) -> QueryResponse:
+    def process_text(
+        self, query: str, client_session_id: str | None = None
+    ) -> QueryResponse:
         if not self.mode_manager.request_user_mode():
             logger.warning("request_user_mode timed out; autonomous cycle still active")
             return QueryResponse(
@@ -112,11 +114,36 @@ class QueryRouter:
                 confidence=0.0,
                 reasoning_trace="",
                 answer="System busy, please try again",
+                path_node_ids=[],
             )
         try:
-            response = self.query_processor.process_query(query)
+            response = self.query_processor.process_query(
+                query, session_id=client_session_id
+            )
             self._enqueue_hypotheses(response.hypotheses)
             return response
+        finally:
+            self.mode_manager.release_to_auto()
+
+    def process_text_stream(
+        self, query: str, client_session_id: str | None = None
+    ) -> Iterator[dict]:
+        if not self.mode_manager.request_user_mode():
+            yield {
+                "type": "error",
+                "ok": False,
+                "message": "System busy, please try again",
+            }
+            return
+        try:
+            for ev in self.query_processor.process_query_stream(
+                query, session_id=client_session_id
+            ):
+                if isinstance(ev, dict) and ev.get("type") == "done":
+                    resp = ev.get("response")
+                    if isinstance(resp, QueryResponse):
+                        self._enqueue_hypotheses(resp.hypotheses)
+                yield ev
         finally:
             self.mode_manager.release_to_auto()
 
