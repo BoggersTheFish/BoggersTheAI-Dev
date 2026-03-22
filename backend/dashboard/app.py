@@ -4,9 +4,9 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
@@ -182,23 +182,86 @@ def wave() -> str:
 """
 
 
+def _graph_node_kind(node_id: str) -> str:
+    if node_id.startswith("user_probe:"):
+        return "probe"
+    if node_id.startswith("conversation:"):
+        return "conversation"
+    if node_id.startswith("query:"):
+        return "query"
+    if node_id.startswith("session:"):
+        return "session"
+    if node_id.startswith("runtime:"):
+        return "runtime"
+    if node_id.startswith("image_caption:"):
+        return "multimodal"
+    return "concept"
+
+
 @app.get("/graph")
-def graph(_: None = Depends(_check_auth)) -> dict[str, Any]:
-    nodes = [
-        {
+def graph(
+    _: None = Depends(_check_auth),
+    max_nodes: Optional[int] = Query(
+        default=None,
+        ge=10,
+        le=5000,
+        description="Omit for full graph; set to cap nodes by activation (browser UI).",
+    ),
+    content_preview: int = Query(96, ge=0, le=500),
+) -> dict[str, Any]:
+    """Graph JSON. Optional max_nodes caps by activation×base_strength for live UI."""
+    rt = get_runtime()
+    g = rt.graph
+    candidates = [n for n in g.nodes.values() if not n.collapsed]
+    candidates.sort(
+        key=lambda n: n.activation * getattr(n, "base_strength", 0.5), reverse=True
+    )
+    if max_nodes is not None:
+        top = candidates[:max_nodes]
+    else:
+        top = candidates
+    id_set = {n.id for n in top}
+
+    preview_len = content_preview
+    if preview_len > 0 and len(top) > 600:
+        preview_len = 0
+
+    nodes: list[dict[str, Any]] = []
+    for n in top:
+        row: dict[str, Any] = {
             "id": n.id,
             "topics": n.topics,
             "activation": n.activation,
             "stability": n.stability,
+            "base_strength": getattr(n, "base_strength", 0.5),
             "collapsed": n.collapsed,
+            "kind": _graph_node_kind(n.id),
         }
-        for n in get_runtime().graph.nodes.values()
-    ]
+        if preview_len > 0:
+            raw = (n.content or "").strip().replace("\n", " ")
+            row["content_preview"] = raw[:preview_len]
+        nodes.append(row)
+
     edges = [
         {"src": e.src, "dst": e.dst, "weight": e.weight}
-        for e in get_runtime().graph.edges
+        for e in g.edges
+        if e.src in id_set and e.dst in id_set
     ]
-    return {"nodes": nodes, "edges": edges}
+
+    wave = rt.get_status()
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "meta": {
+            "total_nodes": len(g.nodes),
+            "total_edges": len(g.edges),
+            "shown_nodes": len(nodes),
+            "shown_edges": len(edges),
+            "cycle_count": int(wave.get("cycle_count", 0)),
+            "tension": float(wave.get("tension", 0.0)),
+            "thread_alive": bool(wave.get("thread_alive", False)),
+        },
+    }
 
 
 @app.get("/graph/viz", response_class=HTMLResponse)

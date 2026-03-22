@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/use-toast";
 import { TSMiniSim } from "@/components/graph/TSMiniSim";
+import { LiveGraphPanel } from "@/components/chat/LiveGraphPanel";
 import { boggersUrl, getSessionHeaders } from "@/lib/boggersApi";
 import { cn } from "@/lib/utils";
 
@@ -346,6 +347,22 @@ export default function LabPage() {
             <TSMiniSim />
             <PushNodeForm />
           </div>
+        </div>
+      </section>
+
+      <div className="ts-divider mx-auto max-w-4xl" />
+
+      <section className="py-16 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold text-white mb-2">Live server graph</h2>
+            <p className="text-muted-foreground text-sm">
+              Same graph the AI uses: activation size, edges, wave cycle + tension. Probes from
+              graph exploration appear in orange; conversation nodes in purple. Refreshes every few
+              seconds and after activity on <Link href="/chat" className="text-ts-purple-light underline">TS Chat</Link>.
+            </p>
+          </div>
+          <LiveGraphPanel className="min-h-[420px]" />
         </div>
       </section>
     </div>

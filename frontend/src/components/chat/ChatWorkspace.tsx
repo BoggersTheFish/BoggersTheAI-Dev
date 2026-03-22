@@ -21,6 +21,7 @@ import {
   chatTranscriptKey,
 } from "@/lib/chatSession";
 import { cn } from "@/lib/utils";
+import { LiveGraphPanel } from "@/components/chat/LiveGraphPanel";
 
 type Role = "user" | "assistant";
 
@@ -67,6 +68,7 @@ export function ChatWorkspace() {
   const [error, setError] = useState("");
 
   const [backendOk, setBackendOk] = useState<boolean | null>(null);
+  const [graphTick, setGraphTick] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -144,6 +146,7 @@ export function ChatWorkspace() {
         createdAt: Date.now(),
       };
       setMessages((m) => [...m, assistantMsg]);
+      setGraphTick((t) => t + 1);
     } catch (e) {
       const msg =
         e instanceof Error
@@ -183,7 +186,7 @@ export function ChatWorkspace() {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] lg:h-[calc(100vh-5rem)] max-w-4xl mx-auto px-3 sm:px-4">
+    <div className="flex flex-col min-h-[calc(100vh-4rem)] max-w-7xl mx-auto px-3 sm:px-4 pb-4">
       {/* Header */}
       <div className="flex-shrink-0 flex flex-wrap items-center justify-between gap-3 py-4 border-b border-ts-purple/20">
         <div className="flex items-center gap-3">
@@ -230,8 +233,10 @@ export function ChatWorkspace() {
         </div>
       </div>
 
+      <div className="flex flex-col lg:flex-row lg:items-stretch gap-4 flex-1 min-h-0">
+        <div className="flex flex-col flex-1 min-h-0 min-w-0 lg:max-w-[min(100%,36rem)]">
       {/* Messages */}
-      <div className="flex-1 min-h-0 overflow-y-auto py-4 space-y-4">
+      <div className="flex-1 min-h-[240px] lg:min-h-0 max-h-[min(55vh,420px)] lg:max-h-none lg:flex-1 overflow-y-auto py-4 space-y-4">
         {messages.length === 0 && !loading && (
           <motion.div
             initial={{ opacity: 0, y: 8 }}
@@ -266,7 +271,7 @@ export function ChatWorkspace() {
       </div>
 
       {/* Composer */}
-      <div className="flex-shrink-0 pb-4 pt-2 border-t border-ts-purple/15">
+      <div className="flex-shrink-0 pt-2 border-t border-ts-purple/15">
         <div className="rounded-xl border border-ts-purple/25 bg-black/60 backdrop-blur-sm p-2">
           <textarea
             ref={textareaRef}
@@ -299,6 +304,12 @@ export function ChatWorkspace() {
             </Button>
           </div>
         </div>
+      </div>
+        </div>
+
+        <aside className="w-full lg:w-[min(100%,440px)] lg:flex-shrink-0 flex flex-col min-h-[300px] lg:min-h-[min(560px,calc(100vh-10rem))] lg:sticky lg:top-20 lg:self-start">
+          <LiveGraphPanel refreshSignal={graphTick} className="flex-1 min-h-[280px] lg:min-h-0" />
+        </aside>
       </div>
     </div>
   );
