@@ -44,7 +44,7 @@ const ROADMAP_NODES = [
     title: "WebAssembly Port",
     wave: 15,
     stability: 0.92,
-    description: "WaveGraph Rust crate compiles to WASM via wasm-pack. TypeScript mirror runs immediately without a build. Lab auto-falls back to WASM when backend is offline.",
+    description: "WaveGraph Rust crate compiles to WASM via wasm-pack. TypeScript mirror runs without a build. Lab uses the live backend; /wasm is the browser-only wave demo.",
     status: "complete" as const,
     link: "/wasm",
   },
